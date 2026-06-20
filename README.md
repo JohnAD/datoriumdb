@@ -1,14 +1,13 @@
 # DatoriumDB
 
-This is a document-oriented database server. These databases are often used when one of the following is a design goal of the project:
+This is a document-oriented database server. Document-oriented databases are often used when one of the following is a design goal of the project:
 
 - Fast read latencies of `O(1)` but slow write latencies of `O(n)` or more. (compared to relational databases which are often the reverse of this.)
 - Individual records/documents that can carry large amounts of non-structured data in addition to schema'd data
 
 ## Features
 
-- **Structurally Sharded** - Even when running on one server, the service runs with the presumption of sharding; allowing 2^0 (1) to 2^32 (4 Billion) servers indendently and cooperatively distributing the data storage.
-- **Separation of Truth** - A document in any document-oriented database can contains information that is (1) authoritative, (2) cached, or (3) untracked. Data in this service is separated by **Collections** and each collection has a schema enforced on all of it's documents that separates these datum roles. For example, if a document has an authoritative "Year" field for a particular object, then not other collection has that same "Year" data authoritatively. However, other Collections can have cached "copies" of the "Year". Documents can also have non-schema'd data that is untracked and is only visible when the individual document is pulled.
+- **Separation of Truth** - A document in any document-oriented database can contains information that is either (1) authoritative, (2) cached, or (3) untracked. Those roles are never mixed. Data in this service is separated by **Collections** and each collection has a schema enforced on all of it's documents that separates these datum roles. For example, if a document has an authoritative "Year" field for a particular object, then not other collection has that same "Year" data authoritatively. However, other Collections can have cached "copies" of the "Year". Documents can also have non-schema'd data that is untracked and is only visible when the individual document is pulled.
 - **Intrinsic Encryption** - A collection and sub-collections can have doc-separated encryption keys. Breaking the key on one document does not let you read any other documents. Each must be broken individually; vastly improving security.
 - **Agentic Update of Cache** - This service keeps an "update queue" of work needing to update the cached copies of authoritative data. 
 - **Automatic Forward Schema Migration** - Collection schemas are versioned and are updatable live; supporting LUA (or TBD).
@@ -17,6 +16,7 @@ This is a document-oriented database server. These databases are often used when
 - **Access Plugins** - How instructions reach the server is based on the executable plugin chosen. HTTPS and FiberSerial are available at first.
 - **Atomic Update** - Multiple document updates, possibly crossing collections, can be submitted and nothing is written until all updates are ready/confirmed.
 - **Patches Stressed** - While clients can do a simple "replace this whole document" request, this is frowned upon and documented as bad practice. Instead the service supports much more finely tuned arguments such as "add object to array and sort by {x}".
+- **Prefix Sharding** - Sharding is done by the prefix of a document's ID rather than the full ID. That way multiple documents can be shepharded to individual shards in a server farm (regardless of collection).
 
 ## Drawbacks
 
