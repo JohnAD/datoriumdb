@@ -21,8 +21,13 @@ This is a document-oriented database server. Document-oriented databases are oft
 ## Drawbacks
 
 - **Eventually Correct** - A document's cached fields are not guaranteed to be true; but will be "eventually" correct. This is a common trait of most document-oriented databases. ^1
-- **All Searches Must Be Planned** - The database services does NOT let you just openly search on any field. Searches are pre-composed and involve database migration. This is one of the reasons why reading is fast but writing is slow.
+- **All Searches Must Be Planned** - The database services does NOT let you just openly search on any field. Searches are pre-composed and involve database migration. This is one of the reasons why reading is fast but writing is slow. ^2
 - **Loose Locking** - Updates/Deletes must match doc version references. A client can send an update request and simply be told "no" if any discrepancy is found. So, the calling software must be written to handle this (possibly forcing it to re-examine the updated documents.)
 
 [1] A client could, of course, simply read multiple documents to get around caching. But that should be a fairly rare circumstance. 
+
 [2] A cllint could, of course, simply open every document in the collection to do a search. But that should be a fairly rare circumstance.
+
+## Speculation:
+
+* [Can a SQL-style multi-table join work and kind-of sort-of scale in a doc db?](relational-joints-in-the-doc-db.md).
