@@ -30,4 +30,4 @@ This is a document-oriented database server. Document-oriented databases are oft
 
 ## Speculation:
 
-* [Can a SQL-style multi-table join work and kind-of sort-of scale in a doc db?](relational-joints-in-the-doc-db.md).
+* [Can a SQL-style multi-table join work and kind-of sort-of scale in a doc db?](relational-joins-in-the-doc-db.md).
