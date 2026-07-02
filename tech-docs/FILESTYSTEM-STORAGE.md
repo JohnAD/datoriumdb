@@ -41,6 +41,38 @@ For example:
 $/db/Movies/01KWD65CFQPEZS7H1WJE4MK990.json
 ```
 
+When a document is patched or deleted, the previous version can be temporarily stored as:
+
+```text
+.{id}.json
+```
+
+For example:
+
+```text
+$/db/Movies/.01KWD65CFQPEZS7H1WJE4MK990.json
+```
+
+This previous-document file is temporary non-source-of-truth data used by the `change-agent`. It lets the agent compare the previous document state with the current document state so it can remove old search entries, update caches, and clean up derived data.
+
+If a previous-document dotfile already exists when another patch occurs, it is left alone. This preserves the oldest undistributed previous version. The `change-agent` can then compare that oldest pending previous version with the latest current version and distribute the net change.
+
+After the `change-agent` successfully distributes the change, it deletes the previous-document dotfile.
+
+Delete operations use the previous-document dotfile plus an explicit delete queue entry. The absence of `{id}.json` alone is not used as the only signal that a delete occurred.
+
+Change queue entries are stored in `.changeQueue` under the collection storage location. Queue filenames include the collection, document ID, and change type:
+
+```text
+{change}__{collection}__{id}.queue
+```
+
+For example:
+
+```text
+$/db/Movies/.changeQueue/delete__Movies__01KWD65CFQPEZS7H1WJE4MK990.queue
+```
+
 The collection schema is stored in a `settings` subdirectory:
 
 ```text

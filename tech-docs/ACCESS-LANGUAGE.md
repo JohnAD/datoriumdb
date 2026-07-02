@@ -37,7 +37,8 @@ create Movies null {"$": "Movies:1", "Title": "The Matrix", "Year": 1999}
 
 The initial command set is:
 
-- `collection` asserts or advances a collection schema.
+- `establish` creates a collection with its initial schema.
+- `upgrade` advances an existing collection schema and applies the required document changes.
 - `create` creates a new document.
 - `read` reads an existing document.
 - `patch` changes an existing document through explicit patch operations.
@@ -45,68 +46,138 @@ The initial command set is:
 
 There is no `update` command. Blind whole-document updates are bad practice because they can overwrite data unintentionally and bypass the more precise patch model.
 
-## Collection
+## Establish
 
-The `collection` command asserts the schema for a collection. Collections and schemas have the same name.
+The `establish` command creates a collection with its initial schema. Collections and schemas have the same name.
 
 ```text
-collection {collection} {ver} {schema}
+establish {collection} 0 {schema}
 ```
 
 The four command parts are:
 
-- `collection` is the command word.
+- `establish` is the command word.
 - `{collection}` is the collection and schema name.
-- `{ver}` is the integer schema version the caller believes the database is currently using.
-- `{schema}` is the schema to assert or apply.
+- `0` is the required initial schema version.
+- `{schema}` is the initial collection schema.
 
 Schemas use the OJSON schema format defined at <https://github.com/JohnAD/ojson>. An OJSON schema is a JSON document. For DatoriumDB collections, the root schema MUST have `kind: object` and an ordered `children` array describing the document fields. OJSON may support other root kinds, but DatoriumDB does not allow them for collection schemas.
 
-The command is version-aware:
+The command creates the collection only if it does not already exist:
 
-- If the collection does not exist and `{ver}` is `0`, the collection is created with `{schema}`.
-- If the collection does not exist and `{ver}` is not `0`, the command returns an error.
-- If the collection exists and `{ver}` matches the current version, nothing happens.
-- If the collection exists and `{ver}` is older than the current version, the command returns a useful error so the caller can catch up with the current database state.
-- If the collection exists and `{ver}` is exactly one greater than the current version, `{schema}` is applied as the new schema.
-- If the collection exists, `{ver}` is exactly one greater than the current version, and `{schema}` is the empty object `{}`, the command returns a distinct error.
+- If the collection does not exist and the version is `0`, the collection is created with `{schema}`.
+- If the collection already exists, the command returns an error.
+- If the version is not `0`, the command returns an error.
+- If `{schema}` is the empty object `{}`, the command returns an error.
 
-This command assumes the caller is up-to-date with the state of the database. Schema changes must advance one version at a time.
+After a collection is established, all later schema changes use `upgrade`.
 
-### Collection Returns
+### Establish Returns
 
-The `collection` response is a result envelope.
+The `establish` response is a result envelope.
 
 On success, it returns command metadata and the resulting collection schema version:
 
 ```text
 {
   ok: true,
-  op: collection,
+  command: establish,
   collection: Movies,
   schema: Movies,
-  version: 1,
-  action: advanced
+  version: 0,
+  action: created
 }
 ```
-
-The `action` field can describe what happened, such as `created`, `matched`, or `advanced`.
 
 On failure, it returns `ok: false` and an `errors` array:
 
 ```text
 {
   ok: false,
-  op: collection,
+  command: establish,
   collection: Movies,
   schema: Movies,
   version: 0,
   errors: [
     {
+      code: collectionAlreadyExists,
+      path: /collection,
+      message: "Collection already exists.",
+      actual: Movies
+    }
+  ]
+}
+```
+
+## Upgrade
+
+The `upgrade` command advances an existing collection schema and applies the required changes to the affected documents.
+
+```text
+upgrade {collection} {from:to} {upgrade-details}
+```
+
+The four command parts are:
+
+- `upgrade` is the command word.
+- `{collection}` is the collection and schema name.
+- `{from:to}` is the schema version transition being applied.
+- `{upgrade-details}` describes the schema update and the related document changes.
+
+For example:
+
+```text
+upgrade Movies 0:1 {new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT, updates: [{op: add, path: /rating, value: 0, schema: {kind: number}}]}
+```
+
+The command is version-aware:
+
+- If the collection does not exist, the command returns an error.
+- If `{from}` does not match the collection's current schema version, the command returns an error.
+- If `{to}` is not exactly one greater than `{from}`, the command returns an error.
+- If `{upgrade-details}` does not include a `new_ver_id`, the command returns an error.
+- If `{upgrade-details}` does not include `updates`, the command returns an error.
+
+Schema upgrades are not just schema assertions. They also define what happens to the documents affected by the schema change.
+
+### Upgrade Returns
+
+The `upgrade` response is a result envelope.
+
+On success, it returns command metadata and the resulting collection schema version:
+
+```text
+{
+  ok: true,
+  command: upgrade,
+  collection: Movies,
+  schema: Movies,
+  versions: {
+    before: 0,
+    after: 1
+  },
+  new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT
+}
+```
+
+On failure, it returns `ok: false` and an `errors` array:
+
+```text
+{
+  ok: false,
+  command: upgrade,
+  collection: Movies,
+  schema: Movies,
+  versions: {
+    before: 0,
+    after: 1
+  },
+  errors: [
+    {
       code: staleSchemaVersion,
       path: /version,
       message: "Collection schema version is older than the current database version.",
-      expected: 2,
+      expected: 1,
       actual: 0
     }
   ]
@@ -152,7 +223,7 @@ On success, it returns command metadata and the newly created document version:
 ```text
 {
   ok: true,
-  op: create,
+  command: create,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   $: Movies:1,
@@ -165,7 +236,7 @@ On failure, it returns `ok: false` and an `errors` array:
 ```text
 {
   ok: false,
-  op: create,
+  command: create,
   collection: Movies,
   id: null,
   errors: [
@@ -220,7 +291,7 @@ For example:
 ```text
 {
   ok: true,
-  op: read,
+  command: read,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   sot: {
@@ -243,7 +314,7 @@ If `{read-scope}` requests additional data, the response includes additional fie
 The read envelope can contain:
 
 - `ok`, whether the read succeeded.
-- `op`, the command that produced the response.
+- `command`, the command that produced the response.
 - `collection`, the collection that was read.
 - `id`, the requested document ID.
 - `sot`, the requested document's source-of-truth fields with reference strings left in place.
@@ -263,12 +334,14 @@ Both `cacheSummaries` and `live` use this shape:
 
 If multiple references target the same document, their requested fields are combined into one returned object. This applies to both cached summaries and live summaries.
 
+If a referenced document cannot be resolved, `cacheSummaries` and `live` return `null` for that collection and ID. The source-of-truth document is not automatically patched to remove lost references.
+
 For example:
 
 ```text
 {
   ok: true,
-  op: read,
+  command: read,
   collection: Conversations,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   sot: {
@@ -292,7 +365,8 @@ For example:
         $: People:1,
         name: "Joe",
         avatar: "joe.png"
-      }
+      },
+      01KWD65DELETED: null
     }
   },
   live: {
@@ -342,7 +416,7 @@ On success, it returns command metadata and the document versions before and aft
 ```text
 {
   ok: true,
-  op: patch,
+  command: patch,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   $: Movies:1,
@@ -358,7 +432,7 @@ On failure, it returns `ok: false` and an `errors` array:
 ```text
 {
   ok: false,
-  op: patch,
+  command: patch,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   errors: [
@@ -405,7 +479,7 @@ On success, it returns command metadata and the deleted document version:
 ```text
 {
   ok: true,
-  op: delete,
+  command: delete,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   #: 01KWD65D94Y5M8C2Z7HJ3N6VQK
@@ -417,7 +491,7 @@ On failure, it returns `ok: false` and an `errors` array:
 ```text
 {
   ok: false,
-  op: delete,
+  command: delete,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   errors: [
@@ -448,7 +522,11 @@ Strings may use quotes, but quotes are not required unless the string contains s
 ## Examples
 
 ```text
-collection Movies 0 {kind: object, children: [{name: Title, kind: string}, {name: Year, kind: number}]}
+establish Movies 0 {kind: object, children: [{name: Title, kind: string}, {name: Year, kind: number}]}
+```
+
+```text
+upgrade Movies 0:1 {new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT, updates: [{op: add, path: /rating, value: 0, schema: {kind: number}}]}
 ```
 
 ```text

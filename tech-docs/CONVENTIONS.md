@@ -8,6 +8,8 @@ Collection names are UTF-8 strings and cannot contain whitespace, using the UTF-
 
 If spacing is needed, underscores are suggested as a substitute.
 
+Collection names cannot contain two underscores in a row.
+
 The first character of a collection name must be a letter.
 
 Capitalization should follow the human language the name is written in. In English, a collection name is a title, so it should follow English title capitalization rules.
