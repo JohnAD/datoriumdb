@@ -24,13 +24,13 @@ The `<detail>` section is a pseudo-JSON object. It follows JSON-like structure, 
 For example, this:
 
 ```text
-create Movies Movies:1 {Title: "The Matrix", Year: 1999}
+create Movies null {$: Movies:1, Title: "The Matrix", Year: 1999}
 ```
 
 is equivalent to:
 
 ```text
-create Movies Movies:1 {"Title": "The Matrix", "Year": 1999}
+create Movies null {"$": "Movies:1", "Title": "The Matrix", "Year": 1999}
 ```
 
 ## Commands
@@ -73,32 +73,112 @@ The command is version-aware:
 
 This command assumes the caller is up-to-date with the state of the database. Schema changes must advance one version at a time.
 
+### Collection Returns
+
+The `collection` response is a result envelope.
+
+On success, it returns command metadata and the resulting collection schema version:
+
+```text
+{
+  ok: true,
+  op: collection,
+  collection: Movies,
+  schema: Movies,
+  version: 1,
+  action: advanced
+}
+```
+
+The `action` field can describe what happened, such as `created`, `matched`, or `advanced`.
+
+On failure, it returns `ok: false` and an `errors` array:
+
+```text
+{
+  ok: false,
+  op: collection,
+  collection: Movies,
+  schema: Movies,
+  version: 0,
+  errors: [
+    {
+      code: staleSchemaVersion,
+      path: /version,
+      message: "Collection schema version is older than the current database version.",
+      expected: 2,
+      actual: 0
+    }
+  ]
+}
+```
+
 ## Create
 
 The `create` command creates a new document in an existing collection.
 
 ```text
-create {collection} {schema:ver} {content}
+create {collection} {id} {content}
 ```
 
 The four command parts are:
 
 - `create` is the command word.
 - `{collection}` is the target collection.
-- `{schema:ver}` is the schema currently in use by the collection, followed by the current integer schema version number.
+- `{id}` is the document ID to create. If `{id}` is `null`, the database automatically creates a ULID.
 - `{content}` is the document content to create.
 
 The collection and schema are validated before the document is created:
 
 - If the collection does not exist, the command returns an error.
-- If `{schema:ver}` does not match the collection's current schema, the command returns an error.
-- If the schema version is wrong, the command returns an error.
+- If `{content}` does not include a `$` schema/version marker, the command returns an error.
+- If the `$` schema/version marker does not match the collection's current schema, the command returns an error.
+- If the schema version in `$` is wrong, the command returns an error.
 
 The database owns some document metadata fields:
 
-- If `{content}` does not include an ID in the `!` field, the database automatically creates a ULID.
-- If `{content}` does not include a schema/version marker in the `$` field, the database automatically creates it.
+- The document ID is taken from `{id}`.
+- If `{id}` is `null`, the database automatically creates a ULID.
+- If `{content}` includes an ID in the `!` field, it must match `{id}` unless `{id}` is `null`.
+- `{content}` MUST include a schema/version marker in the `$` field.
 - `{content}` cannot include a `#` version field because document versions are created by the database.
+
+### Create Returns
+
+The `create` response is a result envelope.
+
+On success, it returns command metadata and the newly created document version:
+
+```text
+{
+  ok: true,
+  op: create,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  $: Movies:1,
+  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK
+}
+```
+
+On failure, it returns `ok: false` and an `errors` array:
+
+```text
+{
+  ok: false,
+  op: create,
+  collection: Movies,
+  id: null,
+  errors: [
+    {
+      code: schemaMismatch,
+      path: /$,
+      message: "Document schema marker does not match the collection schema.",
+      expected: Movies:1,
+      actual: Movies:0
+    }
+  ]
+}
+```
 
 ## Read
 
@@ -129,6 +209,105 @@ For example:
 read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true, live: [People, Studios]}
 ```
 
+### Read Returns
+
+The read response is always a result envelope. This keeps the success or failure state inside the returned data instead of relying on transport-specific metadata such as HTTP status codes.
+
+If `{read-scope}` is empty, the response includes the source-of-truth document fields in `sot`.
+
+For example:
+
+```text
+{
+  ok: true,
+  op: read,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  sot: {
+    !: 01KWD65CFQPEZS7H1WJE4MK990,
+    $: Movies:1,
+    #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+    title: "The Matrix",
+    status: released,
+    genre: scifi,
+    highRated: true,
+    releaseYear: 1999,
+    director: @__People__01KWD65ABCDEF,
+    directorSummary: @@__People__01KWD65ABCDEF
+  }
+}
+```
+
+If `{read-scope}` requests additional data, the response includes additional fields in the same envelope.
+
+The read envelope can contain:
+
+- `ok`, whether the read succeeded.
+- `op`, the command that produced the response.
+- `collection`, the collection that was read.
+- `id`, the requested document ID.
+- `sot`, the requested document's source-of-truth fields with reference strings left in place.
+- `extraFields`, non-schemed fields from the requested document.
+- `cacheSummaries`, cached summary objects grouped by collection and document ID.
+- `live`, live summary objects grouped by collection and document ID.
+
+Both `cacheSummaries` and `live` use this shape:
+
+```text
+{
+  {collection}: {
+    {id}: {summary object}
+  }
+}
+```
+
+If multiple references target the same document, their requested fields are combined into one returned object. This applies to both cached summaries and live summaries.
+
+For example:
+
+```text
+{
+  ok: true,
+  op: read,
+  collection: Conversations,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  sot: {
+    !: 01KWD65CFQPEZS7H1WJE4MK990,
+    $: Conversations:1,
+    #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+    title: "Production Notes",
+    director: @__People__01KWD65DIRECTOR,
+    messages: [
+      {text: "Wake up.", user: @@__People__01KWD65ABCDEF},
+      {text: "Follow the white rabbit.", user: @@__People__01KWD65ABCDEF}
+    ]
+  },
+  extraFields: {
+    localNote: "Imported from an early draft."
+  },
+  cacheSummaries: {
+    People: {
+      01KWD65ABCDEF: {
+        !: 01KWD65ABCDEF,
+        $: People:1,
+        name: "Joe",
+        avatar: "joe.png"
+      }
+    }
+  },
+  live: {
+    People: {
+      01KWD65DIRECTOR: {
+        !: 01KWD65DIRECTOR,
+        $: People:1,
+        name: "Lana Wachowski",
+        currentStatus: available
+      }
+    }
+  }
+}
+```
+
 ## Patch
 
 The `patch` command changes an existing document through explicit patch operations.
@@ -154,6 +333,46 @@ For example:
 patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /Title, value: "The Matrix"}]}
 ```
 
+### Patch Returns
+
+The `patch` response is a result envelope.
+
+On success, it returns command metadata and the document versions before and after the patch:
+
+```text
+{
+  ok: true,
+  op: patch,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  $: Movies:1,
+  versions: {
+    before: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+    after: 01KWD65EJ5F61CE0GS9SX4V4FT
+  }
+}
+```
+
+On failure, it returns `ok: false` and an `errors` array:
+
+```text
+{
+  ok: false,
+  op: patch,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  errors: [
+    {
+      code: versionMismatch,
+      path: /#,
+      message: "Document version does not match.",
+      expected: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+      actual: 01KWD65EJ5F61CE0GS9SX4V4FT
+    }
+  ]
+}
+```
+
 ## Delete
 
 The `delete` command deletes an existing document from a collection.
@@ -177,6 +396,42 @@ For example:
 delete Movies 01KWD65CFQPEZS7H1WJE4MK990 {#: 01KWD65D94Y5M8C2Z7HJ3N6VQK}
 ```
 
+### Delete Returns
+
+The `delete` response is a result envelope.
+
+On success, it returns command metadata and the deleted document version:
+
+```text
+{
+  ok: true,
+  op: delete,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK
+}
+```
+
+On failure, it returns `ok: false` and an `errors` array:
+
+```text
+{
+  ok: false,
+  op: delete,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  errors: [
+    {
+      code: versionMismatch,
+      path: /#,
+      message: "Document version does not match.",
+      expected: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+      actual: 01KWD65EJ5F61CE0GS9SX4V4FT
+    }
+  ]
+}
+```
+
 ## Value Rules
 
 Values inside the detail object are interpreted using these rules:
@@ -197,7 +452,7 @@ collection Movies 0 {kind: object, children: [{name: Title, kind: string}, {name
 ```
 
 ```text
-create Movies Movies:1 {Title: "The Matrix", Year: 1999}
+create Movies null {$: Movies:1, Title: "The Matrix", Year: 1999}
 ```
 
 ```text
