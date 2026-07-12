@@ -12,7 +12,7 @@ To make this library work, it should ideally handle ordered, optionally schemed 
 ## Features
 
 - **Separation of Truth** - A document in any document-oriented database can contain information that is either (1) authoritative, (2) cached, or (3) untracked. Those roles are never mixed. Data in this service is separated by **Collections**, and each collection has a schema enforced on all of its documents that separates these data roles. For example, if a document has an authoritative "Year" field for a particular object, then no other collection has that same "Year" data authoritatively. However, other collections can have cached "copies" of the "Year". Documents can also have non-schemed data that is untracked and is only visible when the individual document is pulled.
-- **Intrinsic Encryption** - A collection and sub-collections can have document-separated encryption keys. Breaking the key on one document does not let you read any other documents. Each must be broken individually, vastly improving security.
+- **Intrinsic Encryption** - Future encryption support is expected to be smart-client driven, with document-level key selection based on tenant, user, policy, or application context. Breaking one document's key should not automatically expose other documents.
 - **Agentic Update of Cache** - This service keeps an "update queue" of work needed to update the cached copies of authoritative data.
 - **Automatic Forward Schema Migration** - Collection schemas are versioned and updatable live, supporting LUA (or TBD).
 - **Storage Plugins** - The data storage method is independent of this service through executable plugins. "JSON filestore" and "BSON filestore" are available at first.

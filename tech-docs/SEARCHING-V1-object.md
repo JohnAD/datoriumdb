@@ -6,16 +6,34 @@ Only schema-defined source-of-truth fields are searchable.
 
 ## Supported Clauses
 
-- `exists`
-- `missing`
+- `exists` with a field-path constant and truth variable
 
 ## `exists`
 
-`exists` matches documents where the object field is present.
+```text
+{field: {field_path_constant}, op: exists, value: {truth_variable}}
+```
 
-## `missing`
+For example:
 
-`missing` matches documents where the object field is absent.
+```text
+{field: /rating, op: exists, value: $hasRatingObject}
+```
+
+`exists` matches documents based on whether the object field is present.
+
+An `exists` clause may include the constant option `hideNulls: true` to treat `null` as absent for that clause.
+
+The truth value is a live query variable:
+
+- `true` means the field must exist.
+- `false` means the field must not exist.
+
+Because the truth variable handles both cases, v1 object search does not need a separate `missing` clause.
+
+## Encoding Note
+
+When a truth variable determines an encoded clause directory, the directory name is the literal `true` or `false`.
 
 ## Searching Object Children
 

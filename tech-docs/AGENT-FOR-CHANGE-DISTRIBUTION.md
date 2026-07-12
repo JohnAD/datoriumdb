@@ -52,25 +52,17 @@ It does the following for every collection:
 
 ### Cache Distribution
 
-It looks for the collection subdirectory for `.cache/{changed-collection}/{id}.json`. If the file or subdirectories do not exist, this step is complete.
+Cache distribution is handled through pending cache update work items, as described in [CACHE-UPDATES.md](CACHE-UPDATES.md).
 
-The current schema for this collection is then read and parsed for `DatoriumCachedRef` string fields. This determines which SOT fields should be cached.
+When a source-of-truth document is created, patched, or deleted, the SOT-member uses the schemas from the establishment server to find `DatoriumCachedRef` fields that may point at the changed source collection.
 
-If any of those references do not have a `summary` restriction, then all SOT fields are used.
+The SOT-member then queues pending cache update work for the read members that may store affected cached summaries.
 
-Note: a well-written schema SHOULD have a summary array. But it is not technically required.
-
-If a reference is locked down to a different collection than the changed document, it is ignored.
-
-Then all summaries are combined to create an accumulative list of needed summary fields.
-
-If there are no open cache references and no limited cache references looking at the changed collection, the `.cache/{changed-collection}/{id}.json` file is deleted.
-
-Otherwise, `.cache/{changed-collection}/{id}.json` is updated with the correct fields using an internal patch call. While this is technically a patch, it is a terminal operation because this change is not automatically distributed anywhere else.
+Read members apply those work items to existing local cache files. They do not scan source-of-truth documents looking for references, and they do not patch source-of-truth documents to remove lost references.
 
 ### Search Distribution
 
-Search distribution updates precompiled search files for the changed document's own collection.
+Search distribution computes precompiled search file changes for the changed document's own collection.
 
 The `change-agent` reads the current search settings under the changed collection's `.search` directory. Each search definition is evaluated against both the previous document state, if present, and the current document state, if present.
 
@@ -82,11 +74,15 @@ For each search definition, the agent determines whether the document should app
 
 Search result file paths are derived from the search name and the clause values that define the result bucket. Path components derived from document values are encoded according to the search storage rules.
 
-When inserting or updating a search result, the agent computes the item's `sort` values from the search definition. The search file stores a list of items containing both `sort` and `id`, so the agent can insert the changed document at the correct position without reading every referenced document.
+When inserting or updating a search result, the agent computes the item's `sort` values from the search definition. The search file stores a list of items containing both `sort` and `id`, so the search SOT can insert the changed document at the correct position without reading every referenced document.
 
 The agent should treat search updates as idempotent. If the document ID is already in the correct search file with the correct sort values, no change is needed. If the ID appears in an old or incorrect search file, that entry is removed.
 
 The previous-document dotfile is especially important for search distribution. Without it, the agent may know where the document belongs now, but not where the document used to belong.
+
+The agent sends each affected search result update to the SOT machine for that search shard as a patch to the search result file.
+
+The search SOT applies the patch, distributes the updated search result to that search shard's read-members, and then returns success to the agent.
 
 Search file updates are written using the normal safe file update behavior and `#` version verification.
 
@@ -96,5 +92,7 @@ The `change-agent` does not remove references from source-of-truth documents whe
 
 Removing those references would mean derived-data maintenance is modifying source-of-truth fields, which can create loops and hidden source changes.
 
-Instead, missing referenced documents are reported at read time. `cacheSummaries` and `live` return `null` for referenced documents that cannot be resolved, leaving the application to decide how to handle the lost reference.
+Instead, missing cached referenced documents are reported at read time. `cacheSummaries` returns a full summary record with a `null` revision (`#`) for referenced documents that cannot be resolved. Requested SOT summary fields are omitted from that record, leaving the application to decide how to handle the lost reference.
+
+Direct references are not resolved by the database during reads. Smart clients are responsible for following direct references and reading those documents from the correct machines.
 

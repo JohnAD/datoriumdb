@@ -2,13 +2,13 @@
 
 This document describes the background `upgrade-agent` that migrates documents after a collection schema is upgraded.
 
-The `upgrade` command validates the schema update patch before any document is changed. If validation succeeds, the collection schema is permanently advanced. The `upgrade-agent` then brings documents forward to the new schema.
+The schema upgrade command-line tool validates the schema update patch before any document is changed. If validation succeeds, the collection schema is permanently advanced. The `upgrade-agent` then brings documents forward to the new schema.
 
 ## Purpose
 
-The `upgrade-agent` exists so the database does not have to rewrite every document during the `upgrade` command itself.
+The `upgrade-agent` exists so the database does not have to rewrite every document during the schema upgrade tool run itself.
 
-After a successful `upgrade`, documents can be migrated in two ways:
+After a successful schema upgrade, documents can be migrated in two ways:
 
 - the `upgrade-agent` works through the collection in the background
 - individual documents are migrated on-the-fly when they are accessed
@@ -29,7 +29,7 @@ The `upgrade-agent` is expected to:
 
 After the collection schema is advanced, document migration should not fail.
 
-The schema update patch must define all fallback and border cases before the `upgrade` command succeeds. This includes default values, failover values, nullable behavior, empty values, kind conversion, import behavior, and abandon behavior.
+The schema update patch must define all fallback and border cases before the schema upgrade succeeds. This includes default values, failover values, nullable behavior, empty values, kind conversion, import behavior, and abandon behavior.
 
 If an old document cannot be migrated using the already-validated rules, that is a database bug or an invalid accepted upgrade patch.
 
@@ -64,4 +64,4 @@ The `upgrade-agent` does not update those derived files directly. It relies on t
 
 A collection upgrade is fully distributed when every document in the collection has the current `$` schema/version marker and all resulting change queue entries have been processed by the `change-agent`.
 
-The collection schema itself is considered advanced as soon as the `upgrade` command succeeds.
+The collection schema itself is considered advanced as soon as the schema upgrade tool succeeds.

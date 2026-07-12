@@ -73,25 +73,35 @@ For example:
 $/db/Movies/.changeQueue/delete__Movies__01KWD65CFQPEZS7H1WJE4MK990.queue
 ```
 
-The collection schema is stored in a `settings` subdirectory:
+Collection schemas are stored in the database config directory, not under each collection directory.
+
+The current schema for a collection is stored as:
 
 ```text
-$/db/Movies/settings/schema.json
-```
-
-The current schema is also stored with its version number:
-
-```text
-$/db/Movies/settings/schema.{ver}.json
+$/db/.config/{CollectionName}.schema.json
 ```
 
 For example:
 
 ```text
-$/db/Movies/settings/schema.1.json
+$/db/.config/Movies.schema.json
 ```
 
-Keeping versioned schema files preserves schema history, which is expected to be important for later migration and compatibility work.
+Each schema version is also preserved:
+
+```text
+$/db/.config/{CollectionName}.schema.{ver}.json
+```
+
+For example:
+
+```text
+$/db/.config/Movies.schema.1.json
+```
+
+Keeping all schema files in `/db/.config` gives the establishment server one place to read the schemas it serves to clients and machines. Keeping versioned schema files preserves schema history, which is expected to be important for later migration and compatibility work.
+
+Database-wide config files in `/db/.config` use a leading `__` prefix to avoid collisions with collection config files. For example, general database config is stored in `__general.json`, server definitions are stored in `__servers.json`, and `shardMap.default` is stored in `__shard-map.json`.
 
 Source-of-truth files and directories use normal names. Non-source-of-truth files and directories are prepended with a period so users can decide whether to track them in Git.
 
@@ -124,10 +134,20 @@ The unversioned `search-settings.json` file lets everyday use load the current s
 Cached data for documents is stored under `.cache`:
 
 ```text
-$/db/Movies/.cache/{collection}
+$/db/Movies/.cache/{SourceCollection}/{sourceDocId}.json
 ```
 
-This cache layout also leaves room for future sharding. For example, `$/db/Movies/.cache/Movies` can store cached off-server summaries for the `Movies` collection.
+Each read server stores at most one cached summary file for a given source collection and source document ID. The cache path does not include the local field path or declaring collection; the read server uses its schemas and local documents to interpret the shared cached summary.
+
+This cache layout also leaves room for future sharding. For example, `$/db/Movies/.cache/People/01KWD65CFQPEZS7H1WJE4MK990.json` can store an off-server cached summary for a `People` document referenced by local `Movies` documents.
+
+Pending cache update work is stored under `.pendingCacheUpdates` on the SOT-member for the changed source collection:
+
+```text
+$/db/Movies/.pendingCacheUpdates/{readServerName}.{docId}.json
+```
+
+Read members apply these work items to their local cache files and delete the work items through the SOT-member API after durable success.
 
 ## File Update Safety
 

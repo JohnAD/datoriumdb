@@ -2,17 +2,21 @@
 
 This document defines the minimum system needed for early DatoriumDB development.
 
-The MVP is intentionally local and narrow. It should prove the document model, access language, schema handling, patch behavior, and file storage design before adding distribution, sharding, or network access.
+The MVP is intentionally narrow, but it is sharding-native from day one. It should prove the document model, access language, schema handling, patch behavior, file storage design, and basic shard routing before adding advanced distributed operations.
 
 ## First Version Scope
 
-The first version will not support sharding.
+The first version will support basic sharding.
 
-The first version will be used locally. It will not expose access over a network, serial line, or other remote transport.
+The first version can run as a single-machine deployment where all shard slots map to the same local machine.
 
-The first version will not have an inherent server process. It will be used as a local library in a sense similar to SQLite3.
+The first version should still use the sharding path internally:
 
-Because there is no inherent server, the local version relies on convention and usage patterns to prevent problems from simultaneous use.
+- compute the document or search shard
+- resolve the target machine from establishment configuration
+- route, accept, or refuse the command based on shard ownership
+
+End-to-end MVP testing should include a Docker Compose arrangement with five or more server processes.
 
 The first version will use local filestorage on a filesystem.
 
@@ -43,14 +47,19 @@ The MVP depends on OJSON for ordered JSON and schema handling.
 
 The MVP depends on a ULID library for internally generated document IDs and document versions.
 
+## Testing
+
+The project should include unit tests for core library behavior and end-to-end tests for full database workflows.
+
+End-to-end MVP tests should include a Docker Compose arrangement with five or more server processes to exercise sharding, routing, agents, and replication behavior.
+
 ## First Version Non-Goals
 
-- No sharding.
-- No network server.
-- No inherent server process.
 - No serial-line access.
 - No remote access plugin system.
-- No distributed coordination.
+- No automatic shard rebalancing.
+- No automatic SOT failover election.
+- No dynamic cluster membership.
 - No per-document encryption.
 - No per-collection encryption.
 - No BSON storage.

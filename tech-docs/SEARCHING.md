@@ -28,8 +28,6 @@ Movies.byYear
 2003 -> [01KWD65EJ5F61CE0GS9SX4V4FT]
 ```
 
-The exact file format is still to be determined.
-
 ## Search Definitions (v1)
 
 Precompiled searches are declared explicitly. The MVP search model supports AND'ed clauses only.
@@ -37,7 +35,7 @@ Precompiled searches are declared explicitly. The MVP search model supports AND'
 For example:
 
 ```text
-compile Movies byReleasedGenre {v1: {clauses: [{field: /status, op: equals, value: $status}, {field: /genre, op: in, parm: $genres}, {field: /highRated, op: isTrue}], sort: [{field: /releaseYear, dir: desc}, {field: /title, dir: asc}, {field: "/!", dir: asc}]}}
+compile Movies byReleasedGenre {v1: {clauses: [{field: /status, op: equals, value: $status}, {field: /genre, op: in, value: [scifi, fantasy], truth: $useGenreFilter}, {field: /highRated, op: equals, value: true}], sort: [{field: /releaseYear, dir: desc}, {field: /title, dir: asc}, {field: "/!", dir: asc}]}}
 ```
 
 This declares a `byReleasedGenre` search for the `Movies` collection.
@@ -45,28 +43,118 @@ This declares a `byReleasedGenre` search for the `Movies` collection.
 The clauses are evaluated as an AND:
 
 - `status` must equal the provided `$status`.
-- `genre` must be in the provided `$genres`.
+- if `$useGenreFilter` is `true`, `genre` must be either `scifi` or `fantasy`.
 - `highRated` must be `true`.
 
 The sort definition determines the stored order of document IDs inside matching search result files.
+
+The stored search definition shape is defined in `SEARCH-DEFINITION-SCHEMA.md`.
+
+## Constants And Variables
+
+A **constant** is a search parameter fixed when the search is defined.
+
+A **variable** is a search parameter provided when a live query uses the precompiled search.
+
+Variables are written with a leading `$` in search definitions. For example, `$status` and `$genres` are variables in the `byReleasedGenre` example above.
+
+Constants and variables both keep searches precompiled. A constant narrows the search definition itself. A variable selects among the stored search result files that the precompiled search maintains.
+
+Not all search clauses support variables. Some clauses only make sense with constants because allowing a live value would turn the search into an open-ended predicate rather than a precompiled lookup.
+
+## Null, Missing, And Exists
+
+DatoriumDB treats `null` as a known document state with a specific meaning: the value is not yet known.
+
+Searches should distinguish three states:
+
+- **Missing**: the field path is absent.
+- **Null**: the field path is present with the value `null`.
+- **Known value**: the field path is present with a non-null value.
+
+By default, `exists` is structural. A field exists if the path is present, even when the value at that path is `null`.
+
+For example:
+
+```text
+{field: /middleName, op: exists, value: true}
+```
+
+matches a document where `/middleName` is present with `null`.
+
+Some searches may want to hide `null` values and treat them as if the path does not exist. An `exists` clause can opt into that behavior with the constant option `hideNulls: true`.
+
+For example:
+
+```text
+{field: /middleName, op: exists, value: true, hideNulls: true}
+```
+
+`hideNulls` is not a live variable. The only supported value is the literal constant `true`.
+
+With `hideNulls: true`, a document where `/middleName` is `null` does not match `exists true`.
 
 ## Search File Paths
 
 For filesystem-backed `plain-text-json` storage, precompiled search files live under the collection's `.search` directory.
 
+The collection name and search name are sufficient to identify the stored search directory.
+
+Each directory below the search name encodes one search clause, in the same order as the clauses are declared in the search definition.
+
+The final file is always named `matches.json` and contains the matching documents for that encoded clause path.
+
 For example, a document matching `status: released` and `genre: scifi` for the `byReleasedGenre` search is upserted to:
 
 ```text
-$/db/Movies/.search/byReleasedGenre/released/scifi.json
+$/db/Movies/.search/byReleasedGenre/released/scifi/matches.json
 ```
 
-Because string values are open-ended and filesystems have naming restrictions, path components derived from field values should be encoded as simple hex.
+Because string values are open-ended and filesystems have naming restrictions, path components derived from string values should be encoded as uppercase hex from the UTF-8 bytes.
+
+An empty string encodes as the literal `empty`.
+
+When a clause path component is determined by a truth variable, the directory name is simply `true` or `false`.
+
+When a clause path component is determined by a `null` comparison value, the directory name is simply `null`.
+
+This does not conflict with string values because string values are hex-encoded.
 
 Using encoded path components, the same example becomes:
 
 ```text
-$/db/Movies/.search/byReleasedGenre/72656c6561736564/7363696669.json
+$/db/Movies/.search/byReleasedGenre/72656c6561736564/7363696669/matches.json
 ```
+
+## Search Sharding
+
+Search result files are sharded separately from documents.
+
+The shard slot for a search result is computed from the encoded search directory path below the search name, with leading and trailing slashes removed. The final `matches.json` filename is not part of the shard input.
+
+For example, this search target:
+
+```text
+$/db/Movies/.search/byReleasedGenre/72656c6561736564/7363696669/matches.json
+```
+
+uses this shard input:
+
+```text
+72656c6561736564/7363696669
+```
+
+Because clients can compute the search shard, a smart client should query the machine assigned to that search result shard.
+
+For this reason, smart clients need to understand search clause rules and search value encoding rules. Without those rules, a client cannot know which shard slot contains the search result document.
+
+Querying the wrong machine returns an error.
+
+Searches are eventually correct. When a document is updated, the SOT machine that accepted the document write does not update every affected search result immediately.
+
+Instead, a later agent computes the related search changes and sends each affected search result update to the SOT machine for that search shard. The search update is sent as a patch to the search result file.
+
+When the search SOT receives the patch, it applies the search result update and distributes that change to the read-members for the search shard before returning success to the agent.
 
 Each search result file contains a JSON object. The object stores a version for the search index file itself, metadata about the search, the decoded search key, and sorted index items.
 
@@ -95,11 +183,21 @@ Each item stores:
 - `sort`, the values needed to maintain the declared sort order.
 - `id`, the matching document ID.
 
+## Sort Null And Missing Order
+
+Sort direction applies to known non-null values.
+
+`null` sort values are always sorted after known non-null values.
+
+Missing sort values are always sorted after both known non-null values and `null` values.
+
+This rule applies for both `asc` and `desc` sorts.
+
 ## Write-Time Maintenance
 
 When a document is created, patched, or deleted, the database determines which precompiled searches are affected.
 
-For each affected search, the database updates the stored search files as part of the same logical write.
+For each affected search, the database eventually updates the stored search files through the change-agent.
 
 Write operations should follow this general pattern:
 
@@ -107,7 +205,7 @@ Write operations should follow this general pattern:
 2. Apply the requested create, patch, or delete.
 3. Compare old and new values for fields used by precompiled searches.
 4. Stage updated document files and search files.
-5. Commit staged files with filesystem move operations.
+5. Send search result patches to the SOT machines for the affected search shards.
 
 ## Create
 
@@ -131,7 +229,7 @@ For example, creating this document:
 would upsert the document ID into:
 
 ```text
-$/db/Movies/.search/byReleasedGenre/72656c6561736564/7363696669.json
+$/db/Movies/.search/byReleasedGenre/72656c6561736564/7363696669/matches.json
 ```
 
 If `highRated` were `false`, the document would not be stored in this search result at all.
@@ -160,7 +258,7 @@ Initial search support can be limited to:
 - AND'ed clauses only
 - exact-match clauses
 - same-field `in` clauses
-- boolean clauses such as `isTrue`
+- boolean `equals` clauses
 - sorted document ID lists
 - no joins
 - no arbitrary predicates
@@ -169,8 +267,5 @@ Initial search support can be limited to:
 ## Open Questions
 
 - How should searches be declared in the access language?
-- Should search definitions live in the collection schema, a separate metadata file, or both?
-- Should hex path encoding use raw UTF-8 bytes, normalized Unicode, or another canonical form?
-- Should missing fields be omitted or indexed under a special key?
 - Should search result lists store document IDs only, or cached summaries as well?
 - How should search maintenance failures be recovered after an interrupted write?

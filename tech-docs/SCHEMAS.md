@@ -98,7 +98,9 @@ These are still stored as strings in document content.
 
 A direct document reference uses `format: DatoriumDirectRef`.
 
-Direct references can be optionally returned from a `read` command. They are computationally expensive because they are pulled directly from live data. They are slower, but guaranteed to be accurate.
+Direct references are stored and returned as strings. The database does not resolve them into live referenced document content during a `read`.
+
+Smart clients are responsible for reading direct references from the correct machines.
 
 For example:
 
@@ -117,13 +119,6 @@ For example:
 ```text
 @__People__01KWD65CFQPEZS7H1WJE4MK990
 ```
-
-You can add an optional `custom` object to direct reference fields. Specifically:
-
-- `collection: {collection}` locks the reference to a single collection.
-- `summary: [...]` specifies which fields should be included from the referenced document. Non-schemed fields from the other collection cannot be returned.
-
-If the `custom` field is missing, any collection can be referenced, and all the SOT fields are returned from the live referenced document.
 
 ## Cached Document Summary References
 
@@ -149,9 +144,9 @@ For example:
 @@__People__01KWD65CFQPEZS7H1WJE4MK990
 ```
 
-You can add an optional `custom` object to cached reference fields. Specifically:
+A cached reference field MUST include a `custom` object. Specifically:
 
-- `collection: {collection}` locks the reference to a single collection.
+- `collections: [...]` restricts the reference to one of the listed collections.
 - `summary: [...]` specifies which fields should be locally cached from the referenced document. Non-schemed fields from the other collection cannot be returned.
 
 For example:
@@ -162,13 +157,33 @@ For example:
   kind: string,
   format: DatoriumCachedRef,
   custom: {
-    collection: People,
+    collections: [People],
     summary: [name, birthYear]
   }
 }
 ```
 
-If the `custom` field is missing, any collection can be referenced, and all the SOT fields are cached from the referenced document.
+Cached references cannot target any collection. The allowed collections must be explicit.
+
+The `summary` field is a list of strings. Each string is a schema path relative to the referenced document.
+
+For example:
+
+```text
+summary: [name, birthYear, address/zip_code]
+```
+
+Summary paths are interpreted in the context of the referenced document's collection. This matters when a cached reference can target more than one collection.
+
+The summary rules are forgiving:
+
+- A summary path must be valid in at least one allowed target collection.
+- If a path does not exist in a particular referenced document's collection, it is skipped for that cached summary.
+- If a path reaches a non-object value before the path ends, it is skipped for that collection.
+- If a path exists in multiple collections with different kinds, that is allowed because the value is copied as JSON, not coerced.
+- Non-schemed fields are never returned.
+
+The client can interpret cached summary objects using the collection grouping in `cacheSummaries`.
 
 ## Arrays
 

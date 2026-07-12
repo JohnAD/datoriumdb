@@ -17,13 +17,13 @@ For example:
 
 This update list is not exactly RFC 6902. A schema update manipulates both the schema and the underlying documents at the same time.
 
-A collection is created for the first time with the `establish` command. After that, the collection is advanced with the `upgrade` command.
+Collections are created and advanced through administrative command-line tools, not access-language commands. Command-line tooling is tracked in [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
 
 ## Upgrade Atomicity
 
 The database is intentionally strict about schema update patches.
 
-The `upgrade` command validates the update patch before any document is changed. If the update patch is invalid, the `upgrade` command fails and no documents are modified.
+The schema upgrade tool validates the update patch before any document is changed. If the update patch is invalid, the schema upgrade fails and no documents are modified.
 
 If the update patch succeeds, the collection schema is permanently advanced. From that point forward, documents are migrated to the new schema by one of two paths:
 

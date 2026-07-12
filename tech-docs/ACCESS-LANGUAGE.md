@@ -35,10 +35,8 @@ create Movies null {"$": "Movies:1", "Title": "The Matrix", "Year": 1999}
 
 ## Commands
 
-The initial command set is:
+The initial access command set is:
 
-- `establish` creates a collection with its initial schema.
-- `upgrade` advances an existing collection schema and applies the required document changes.
 - `create` creates a new document.
 - `read` reads an existing document.
 - `patch` changes an existing document through explicit patch operations.
@@ -46,143 +44,7 @@ The initial command set is:
 
 There is no `update` command. Blind whole-document updates are bad practice because they can overwrite data unintentionally and bypass the more precise patch model.
 
-## Establish
-
-The `establish` command creates a collection with its initial schema. Collections and schemas have the same name.
-
-```text
-establish {collection} 0 {schema}
-```
-
-The four command parts are:
-
-- `establish` is the command word.
-- `{collection}` is the collection and schema name.
-- `0` is the required initial schema version.
-- `{schema}` is the initial collection schema.
-
-Schemas use the OJSON schema format defined at <https://github.com/JohnAD/ojson>. An OJSON schema is a JSON document. For DatoriumDB collections, the root schema MUST have `kind: object` and an ordered `children` array describing the document fields. OJSON may support other root kinds, but DatoriumDB does not allow them for collection schemas.
-
-The command creates the collection only if it does not already exist:
-
-- If the collection does not exist and the version is `0`, the collection is created with `{schema}`.
-- If the collection already exists, the command returns an error.
-- If the version is not `0`, the command returns an error.
-- If `{schema}` is the empty object `{}`, the command returns an error.
-
-After a collection is established, all later schema changes use `upgrade`.
-
-### Establish Returns
-
-The `establish` response is a result envelope.
-
-On success, it returns command metadata and the resulting collection schema version:
-
-```text
-{
-  ok: true,
-  command: establish,
-  collection: Movies,
-  schema: Movies,
-  version: 0,
-  action: created
-}
-```
-
-On failure, it returns `ok: false` and an `errors` array:
-
-```text
-{
-  ok: false,
-  command: establish,
-  collection: Movies,
-  schema: Movies,
-  version: 0,
-  errors: [
-    {
-      code: collectionAlreadyExists,
-      path: /collection,
-      message: "Collection already exists.",
-      actual: Movies
-    }
-  ]
-}
-```
-
-## Upgrade
-
-The `upgrade` command advances an existing collection schema and applies the required changes to the affected documents.
-
-```text
-upgrade {collection} {from:to} {upgrade-details}
-```
-
-The four command parts are:
-
-- `upgrade` is the command word.
-- `{collection}` is the collection and schema name.
-- `{from:to}` is the schema version transition being applied.
-- `{upgrade-details}` describes the schema update and the related document changes.
-
-For example:
-
-```text
-upgrade Movies 0:1 {new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT, updates: [{op: add, path: /rating, value: 0, schema: {kind: number}}]}
-```
-
-The command is version-aware:
-
-- If the collection does not exist, the command returns an error.
-- If `{from}` does not match the collection's current schema version, the command returns an error.
-- If `{to}` is not exactly one greater than `{from}`, the command returns an error.
-- If `{upgrade-details}` does not include a `new_ver_id`, the command returns an error.
-- If `{upgrade-details}` does not include `updates`, the command returns an error.
-
-Schema upgrades are not just schema assertions. They also define what happens to the documents affected by the schema change.
-
-### Upgrade Returns
-
-The `upgrade` response is a result envelope.
-
-On success, it returns command metadata and the resulting collection schema version:
-
-```text
-{
-  ok: true,
-  command: upgrade,
-  collection: Movies,
-  schema: Movies,
-  versions: {
-    before: 0,
-    after: 1
-  },
-  new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT
-}
-```
-
-On failure, it returns `ok: false` and an `errors` array:
-
-```text
-{
-  ok: false,
-  command: upgrade,
-  collection: Movies,
-  schema: Movies,
-  versions: {
-    before: 0,
-    after: 1
-  },
-  errors: [
-    {
-      code: staleSchemaVersion,
-      path: /version,
-      message: "Collection schema version is older than the current database version.",
-      expected: 1,
-      actual: 0
-    }
-  ]
-}
-```
+Collection creation and schema upgrades are administrative operations, not access-language commands. They are performed through command-line tools that validate and update the establishment config files.
 
 ## Create
 
@@ -272,12 +134,11 @@ The read scope can request additional data:
 
 - `extraFields: true` returns non-schemed fields.
 - `cacheSummaries: true` returns local cached reference summaries.
-- `live: [...]` requests live indirect summary pulls from the listed collections. This is expected to be expensive.
 
 For example:
 
 ```text
-read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true, live: [People, Studios]}
+read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true}
 ```
 
 ### Read Returns
@@ -320,9 +181,8 @@ The read envelope can contain:
 - `sot`, the requested document's source-of-truth fields with reference strings left in place.
 - `extraFields`, non-schemed fields from the requested document.
 - `cacheSummaries`, cached summary objects grouped by collection and document ID.
-- `live`, live summary objects grouped by collection and document ID.
 
-Both `cacheSummaries` and `live` use this shape:
+`cacheSummaries` uses this shape:
 
 ```text
 {
@@ -332,9 +192,11 @@ Both `cacheSummaries` and `live` use this shape:
 }
 ```
 
-If multiple references target the same document, their requested fields are combined into one returned object. This applies to both cached summaries and live summaries.
+If multiple cached references target the same document, their requested fields are combined into one returned object.
 
-If a referenced document cannot be resolved, `cacheSummaries` and `live` return `null` for that collection and ID. The source-of-truth document is not automatically patched to remove lost references.
+If a cached referenced document cannot be resolved, `cacheSummaries` returns a full summary record for that collection and ID with a `null` revision (`#`). Requested SOT summary fields are omitted from that summary object because the referenced document does not currently exist. The source-of-truth document is not automatically patched to remove lost references.
+
+Direct references are not resolved by `read`. They remain source-of-truth strings in `sot`. Smart clients are responsible for reading those referenced documents from the correct machines.
 
 For example:
 
@@ -366,16 +228,10 @@ For example:
         name: "Joe",
         avatar: "joe.png"
       },
-      01KWD65DELETED: null
-    }
-  },
-  live: {
-    People: {
-      01KWD65DIRECTOR: {
-        !: 01KWD65DIRECTOR,
+      01KWD65DELETED: {
+        !: 01KWD65DELETED,
         $: People:1,
-        name: "Lana Wachowski",
-        currentStatus: available
+        #: null
       }
     }
   }
@@ -522,19 +378,11 @@ Strings may use quotes, but quotes are not required unless the string contains s
 ## Examples
 
 ```text
-establish Movies 0 {kind: object, children: [{name: Title, kind: string}, {name: Year, kind: number}]}
-```
-
-```text
-upgrade Movies 0:1 {new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT, updates: [{op: add, path: /rating, value: 0, schema: {kind: number}}]}
-```
-
-```text
 create Movies null {$: Movies:1, Title: "The Matrix", Year: 1999}
 ```
 
 ```text
-read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true, live: [People, Studios]}
+read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true}
 ```
 
 ```text
