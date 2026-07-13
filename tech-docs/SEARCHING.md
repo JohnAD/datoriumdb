@@ -148,7 +148,7 @@ Because clients can compute the search shard, a smart client should query the ma
 
 For this reason, smart clients need to understand search clause rules and search value encoding rules. Without those rules, a client cannot know which shard slot contains the search result document.
 
-Querying the wrong machine returns an error.
+Querying the wrong machine returns an `ok: false` error envelope.
 
 Searches are eventually correct. When a document is updated, the SOT machine that accepted the document write does not update every affected search result immediately.
 
@@ -160,17 +160,17 @@ Each search result file contains a JSON object. The object stores a version for 
 
 For example:
 
-```text
+```json
 {
-  #: 01KWE2M2W3JY8TKY2P3V4X5A6B,
-  $: SearchResult:v1,
-  search: byReleasedGenre,
-  collection: Movies,
-  key: [released, scifi],
-  items: [
+  "#": "01KWE2M2W3JY8TKY2P3V4X5A6B",
+  "$": "SearchResult:v1",
+  "search": "byReleasedGenre",
+  "collection": "Movies",
+  "key": ["released", "scifi"],
+  "items": [
     {
-      sort: [1999, "The Matrix", 01KWDRHGK2GXE2B0VZ85GT546T],
-      id: 01KWDRHGK2GXE2B0VZ85GT546T
+      "sort": [1999, "The Matrix", "01KWDRHGK2GXE2B0VZ85GT546T"],
+      "id": "01KWDRHGK2GXE2B0VZ85GT546T"
     }
   ]
 }
@@ -215,14 +215,14 @@ If a search field is absent, the document is not added to that search key unless
 
 For example, creating this document:
 
-```text
+```json
 {
-  !: 01KWDRHGK2GXE2B0VZ85GT546T,
-  title: "The Matrix",
-  status: released,
-  genre: scifi,
-  highRated: true,
-  releaseYear: 1999
+  "!": "01KWDRHGK2GXE2B0VZ85GT546T",
+  "title": "The Matrix",
+  "status": "released",
+  "genre": "scifi",
+  "highRated": true,
+  "releaseYear": 1999
 }
 ```
 

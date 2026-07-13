@@ -14,14 +14,14 @@ The root object contains an ordered `children` array. Each child describes one s
 
 For example:
 
-```text
+```json
 {
-  kind: object,
-  children: [
-    {name: title, kind: string, required: true},
-    {name: releaseYear, kind: number, integer: true},
-    {name: status, kind: string},
-    {name: highRated, kind: boolean}
+  "kind": "object",
+  "children": [
+    {"name": "title", "kind": "string", "required": true},
+    {"name": "releaseYear", "kind": "number", "integer": true},
+    {"name": "status", "kind": "string"},
+    {"name": "highRated", "kind": "boolean"}
   ]
 }
 ```
@@ -55,8 +55,8 @@ Searches may only use schema-defined source-of-truth fields. Non-schema fields a
 
 A field can be marked as required:
 
-```text
-{name: title, kind: string, required: true}
+```json
+{"name": "title", "kind": "string", "required": true}
 ```
 
 If `required` is absent or false, the field is optional.
@@ -65,8 +65,8 @@ If `required` is absent or false, the field is optional.
 
 A field can define a default value:
 
-```text
-{name: highRated, kind: boolean, default: false}
+```json
+{"name": "highRated", "kind": "boolean", "default": false}
 ```
 
 Defaults must match the field kind.
@@ -79,8 +79,8 @@ Defaults must match the field kind.
 
 If a field can be explicitly `null`, it should use OJSON's nullable behavior:
 
-```text
-{name: retiredAt, kind: string, nullable: true}
+```json
+{"name": "retiredAt", "kind": "string", "nullable": true}
 ```
 
 ## Strings And Formats
@@ -104,8 +104,8 @@ Smart clients are responsible for reading direct references from the correct mac
 
 For example:
 
-```text
-{name: director, kind: string, format: DatoriumDirectRef}
+```json
+{"name": "director", "kind": "string", "format": "DatoriumDirectRef"}
 ```
 
 The stored value should use the direct document reference convention:
@@ -128,8 +128,8 @@ A cache is a local copy of the referenced document that is later updated by the 
 
 For example:
 
-```text
-{name: directorSummary, kind: string, format: DatoriumCachedRef}
+```json
+{"name": "directorSummary", "kind": "string", "format": "DatoriumCachedRef"}
 ```
 
 The stored value should use the cached document summary reference convention:
@@ -151,26 +151,26 @@ A cached reference field MUST include a `custom` object. Specifically:
 
 For example:
 
-```text
+```json
 {
-  name: directorSummary,
-  kind: string,
-  format: DatoriumCachedRef,
-  custom: {
-    collections: [People],
-    summary: [name, birthYear]
+  "name": "directorSummary",
+  "kind": "string",
+  "format": "DatoriumCachedRef",
+  "custom": {
+    "collections": ["People"],
+    "summary": ["name", "birthYear"]
   }
 }
 ```
 
-Cached references cannot target any collection. The allowed collections must be explicit.
+Cached references cannot target all collections. The allowed collections must be explicit.
 
 The `summary` field is a list of strings. Each string is a schema path relative to the referenced document.
 
 For example:
 
-```text
-summary: [name, birthYear, address/zip_code]
+```json
+{"summary": ["name", "birthYear", "address/zip_code"]}
 ```
 
 Summary paths are interpreted in the context of the referenced document's collection. This matters when a cached reference can target more than one collection.
@@ -191,11 +191,11 @@ Array schemas may define an `items` schema.
 
 For example:
 
-```text
+```json
 {
-  name: genres,
-  kind: array,
-  items: {kind: string}
+  "name": "genres",
+  "kind": "array",
+  "items": {"kind": "string"}
 }
 ```
 
@@ -207,13 +207,13 @@ Object fields may contain their own ordered `children`.
 
 For example:
 
-```text
+```json
 {
-  name: rating,
-  kind: object,
-  children: [
-    {name: source, kind: string},
-    {name: value, kind: number}
+  "name": "rating",
+  "kind": "object",
+  "children": [
+    {"name": "source", "kind": "string"},
+    {"name": "value", "kind": "number"}
   ]
 }
 ```
@@ -232,17 +232,17 @@ When creating documents, DatoriumDB can automatically create `!` and `$` if they
 
 ## Example Collection Schema
 
-```text
+```json
 {
-  kind: object,
-  children: [
-    {name: title, kind: string, required: true},
-    {name: status, kind: string, required: true},
-    {name: genre, kind: string},
-    {name: highRated, kind: boolean, default: false},
-    {name: releaseYear, kind: number, integer: true},
-    {name: director, kind: string, format: DatoriumDirectRef},
-    {name: directorSummary, kind: string, format: DatoriumCachedRef}
+  "kind": "object",
+  "children": [
+    {"name": "title", "kind": "string", "required": true},
+    {"name": "status", "kind": "string", "required": true},
+    {"name": "genre", "kind": "string"},
+    {"name": "highRated", "kind": "boolean", "default": false},
+    {"name": "releaseYear", "kind": "number", "integer": true},
+    {"name": "director", "kind": "string", "format": "DatoriumDirectRef"},
+    {"name": "directorSummary", "kind": "string", "format": "DatoriumCachedRef"}
   ]
 }
 ```

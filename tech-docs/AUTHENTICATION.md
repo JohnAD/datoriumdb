@@ -54,7 +54,7 @@ Private signing keys and bootstrap secrets should not be stored in Git-tracked c
 1. The smart client obtains a client token from the configured DatoriumDB auth mechanism.
 2. The smart client calls `GET /datoriumdb/v1/establish` with the bearer token.
 3. The establishment server validates the token.
-4. The establishment server returns the combined establishment document.
+4. The establishment server returns an `ok: true` envelope containing the combined establishment document.
 5. The smart client uses that document to route requests to the correct DatoriumDB servers.
 6. The smart client sends the same bearer token to the DatoriumDB servers it contacts.
 7. Each server validates the token locally.
@@ -82,7 +82,7 @@ Startup flow:
 2. The server reads its bootstrap credential from the environment.
 3. The server uses the bootstrap credential to obtain or prove a machine identity.
 4. The server calls `GET /datoriumdb/v1/establish`.
-5. The server receives the combined establishment document.
+5. The server receives an `ok: true` envelope containing the combined establishment document.
 6. The server updates its local `/db/.config` cache from the establishment response.
 7. The server learns its roles from `general.establishmentServer` and `shardMap`.
 8. The server begins accepting only the requests allowed by its roles.

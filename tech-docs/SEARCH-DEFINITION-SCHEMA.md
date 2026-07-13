@@ -33,22 +33,22 @@ This avoids having to migrate old search result directories or reinterpret exist
 
 Conceptually:
 
-```text
+```json
 {
-  $: SearchDefinition:v1,
-  collection: Movies,
-  name: byReleasedGenre,
-  version: 1,
-  v1: {
-    clauses: [
-      {field: /status, op: equals, value: $status},
-      {field: /genre, op: in, value: [scifi, fantasy], truth: $useGenreFilter},
-      {field: /highRated, op: equals, value: true}
+  "$": "SearchDefinition:v1",
+  "collection": "Movies",
+  "name": "byReleasedGenre",
+  "version": 1,
+  "v1": {
+    "clauses": [
+      {"field": "/status", "op": "equals", "value": "$status"},
+      {"field": "/genre", "op": "in", "value": ["scifi", "fantasy"], "truth": "$useGenreFilter"},
+      {"field": "/highRated", "op": "equals", "value": true}
     ],
-    sort: [
-      {field: /releaseYear, dir: desc},
-      {field: /title, dir: asc},
-      {field: "/!", dir: asc}
+    "sort": [
+      {"field": "/releaseYear", "dir": "desc"},
+      {"field": "/title", "dir": "asc"},
+      {"field": "/!", "dir": "asc"}
     ]
   }
 }

@@ -39,7 +39,7 @@ In this model:
 - exactly one machine is the current source-of-truth write authority for a shard
 - other machines can receive replicated writes and update their local derived data
 - clients can compute the shard from the document ID prefix
-- if a client sends a write to the wrong machine, that machine refuses the write and returns the correct target
+- if a client sends a write to the wrong machine, that machine refuses the write with an `ok: false` response that includes the correct target
 
 This means a shard is primarily a write-authority boundary.
 
@@ -85,7 +85,7 @@ Replication failure handling is described in `REPLICATION-FAILURE-HANDLING.md`.
 
 Direct document references are resolved by smart clients, not by the database during a read response. The client uses the referenced document ID, computes the shard, and reads the referenced document from the correct machine.
 
-Searches are also sharded. The client computes the search shard from the field path used to encode the search parameters and queries the machine assigned to that search shard. Querying the wrong machine returns an error.
+Searches are also sharded. The client computes the search shard from the field path used to encode the search parameters and queries the machine assigned to that search shard. Querying the wrong machine returns an `ok: false` error envelope.
 
 Search result updates are routed to the SOT-member for the search shard. The search SOT applies the patch and distributes the updated search result to the search shard's read-members before returning success to the agent.
 

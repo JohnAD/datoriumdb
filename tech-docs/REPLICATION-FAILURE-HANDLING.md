@@ -54,16 +54,16 @@ Each collection directory on the SOT machine can have a `.pendingWrites` subdire
 
 For example:
 
-```text
+```json
 {
-  operationId: 01KXYZ...,
-  targetServer: serverB,
-  shardSlot: "7A",
-  collection: Movies,
-  id: 01KWDRHGK2GXE2B0VZ85GT546T,
-  documentVersion: 01KXYZ...,
-  patch: { ... },
-  state: pending
+  "operationId": "01KXYZ...",
+  "targetServer": "serverB",
+  "shardSlot": "7A",
+  "collection": "Movies",
+  "id": "01KWDRHGK2GXE2B0VZ85GT546T",
+  "documentVersion": "01KXYZ...",
+  "patch": [],
+  "state": "pending"
 }
 ```
 
@@ -323,7 +323,7 @@ Each replicated write should include:
 - after document version
 - operation ID
 - command type
-- payload or patch
+- full-document `payload` or RFC 6902-compatible `patch` operation list
 
 ## Read-Member Catch-Up
 

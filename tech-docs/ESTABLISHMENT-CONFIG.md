@@ -48,10 +48,13 @@ The response should be self-contained enough that a client can route reads, writ
 
 The `GET /datoriumdb/v1/establish` endpoint returns a single combined JSON document assembled from the config files under `/db/.config`.
 
+Like all DatoriumDB API endpoints, the establishment endpoint returns HTTP `200` with a response envelope. On success, `ok` is `true`. On failure, `ok` is `false` and the response includes an `errors` array.
+
 Conceptually:
 
 ```text
 {
+  ok: true,
   general: { ... },
   servers: { ... },
   shardMap: { ... },
@@ -108,14 +111,16 @@ It should contain:
 
 Conceptually:
 
-```text
-general: {
-  name: "DatoriumDB Local",
-  establishmentServer: serverA,
-  version: 1,
-  readMemberCheckinSeconds: 10,
-  cacheUpdateCheckinSeconds: 60,
-  readMemberFailedCheckinsBeforeStale: 3
+```json
+{
+  "general": {
+    "name": "DatoriumDB Local",
+    "establishmentServer": "serverA",
+    "version": 1,
+    "readMemberCheckinSeconds": 10,
+    "cacheUpdateCheckinSeconds": 60,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
 }
 ```
 
@@ -172,7 +177,7 @@ The combined establishment response only includes current schemas. If an SOT-mem
 GET /datoriumdb/v1/schema/{collectionName}/{ver}
 ```
 
-The establishment server reads historic schema versions from `/db/.config/{CollectionName}.schema.{ver}.json`.
+On success, the endpoint returns an `ok: true` envelope containing the requested historic schema. The establishment server reads historic schema versions from `/db/.config/{CollectionName}.schema.{ver}.json`.
 
 ## Shard Maps
 
@@ -192,18 +197,20 @@ The default shard map is read from `/db/.config/__shard-map.json`.
 
 Conceptually:
 
-```text
-shardMap: {
-  default: {
-    "00-7F": {
-      SHARD_SOT_MEMBER: serverA,
-      SHARD_READ_MEMBER: [serverB],
-      PROXY_READ_MEMBER: [analysisA]
-    },
-    "80-FF": {
-      SHARD_SOT_MEMBER: serverC,
-      SHARD_READ_MEMBER: [serverD],
-      PROXY_READ_MEMBER: [analysisA]
+```json
+{
+  "shardMap": {
+    "default": {
+      "00-7F": {
+        "SHARD_SOT_MEMBER": "serverA",
+        "SHARD_READ_MEMBER": ["serverB"],
+        "PROXY_READ_MEMBER": ["analysisA"]
+      },
+      "80-FF": {
+        "SHARD_SOT_MEMBER": "serverC",
+        "SHARD_READ_MEMBER": ["serverD"],
+        "PROXY_READ_MEMBER": ["analysisA"]
+      }
     }
   }
 }
@@ -225,15 +232,23 @@ A future version may allow a collection to define a shard map that overrides `sh
 
 For example:
 
-```text
-shardMap: {
-  default: { ... },
-  collections: {
-    AuditEvents: {
+```json
+{
+  "shardMap": {
+    "default": {
       "00-FF": {
-        SHARD_SOT_MEMBER: serverE,
-        SHARD_READ_MEMBER: [serverE],
-        PROXY_READ_MEMBER: [analysisA]
+        "SHARD_SOT_MEMBER": "serverA",
+        "SHARD_READ_MEMBER": ["serverB"],
+        "PROXY_READ_MEMBER": ["analysisA"]
+      }
+    },
+    "collections": {
+      "AuditEvents": {
+        "00-FF": {
+          "SHARD_SOT_MEMBER": "serverE",
+          "SHARD_READ_MEMBER": ["serverE"],
+          "PROXY_READ_MEMBER": ["analysisA"]
+        }
       }
     }
   }
@@ -254,19 +269,21 @@ Each server entry identifies a network service endpoint. For now, `baseURL` is t
 
 For example:
 
-```text
-servers: {
-  serverA: {
-    baseURL: "https://shard00.mytest.local"
-  },
-  serverB: {
-    baseURL: "https://s32.datoriumdb.com"
-  },
-  analysisA: {
-    baseURL: "https://analysis.datoriumdb.com"
-  },
-  localServer: {
-    baseURL: "http://127.0.0.1:9001"
+```json
+{
+  "servers": {
+    "serverA": {
+      "baseURL": "https://shard00.mytest.local"
+    },
+    "serverB": {
+      "baseURL": "https://s32.datoriumdb.com"
+    },
+    "analysisA": {
+      "baseURL": "https://analysis.datoriumdb.com"
+    },
+    "localServer": {
+      "baseURL": "http://127.0.0.1:9001"
+    }
   }
 }
 ```
@@ -306,7 +323,7 @@ After authentication, if authentication is needed, a server fetches establishmen
 GET /datoriumdb/v1/establish
 ```
 
-That endpoint returns the combined JSON establishment document containing general config, server definitions, the shard map, schemas, and other establishment config needed by the caller.
+That endpoint returns an `ok: true` envelope containing the combined JSON establishment document with general config, server definitions, the shard map, schemas, and other establishment config needed by the caller.
 
 ## Machine Roles
 

@@ -46,6 +46,18 @@ There is no `update` command. Blind whole-document updates are bad practice beca
 
 Collection creation and schema upgrades are administrative operations, not access-language commands. They are performed through command-line tools that validate and update the establishment config files.
 
+## API Response Shape
+
+All DatoriumDB API endpoints return application-level success or failure in the response body.
+
+Successful API calls return HTTP `200` with a JSON object containing `ok: true`.
+
+Failed API calls also return HTTP `200`, but with `ok: false` and an `errors` array.
+
+Authentication, authorization, validation, wrong-machine routing, stale-version checks, and other application-level failures should use the same `ok: false` envelope.
+
+This keeps DatoriumDB command results consistent across access-language commands, establishment endpoints, and server-to-server endpoints. Transport-level failures can still happen when the server cannot be reached or the HTTP request itself cannot be processed.
+
 ## Create
 
 The `create` command creates a new document in an existing collection.
@@ -143,7 +155,7 @@ read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true}
 
 ### Read Returns
 
-The read response is always a result envelope. This keeps the success or failure state inside the returned data instead of relying on transport-specific metadata such as HTTP status codes.
+The read response is always a result envelope.
 
 If `{read-scope}` is empty, the response includes the source-of-truth document fields in `sot`.
 
@@ -260,8 +272,20 @@ The initial patch operation format is based on RFC 6902 JSON Patch. To leave roo
 For example:
 
 ```text
-patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /Title, value: "The Matrix"}]}
+patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /status, value: released}]}
 ```
+
+The `RFC6902` field contains a JSON Patch operation list.
+
+Patch operations cannot target database-owned metadata fields:
+
+- `!`, the document ID
+- `$`, the schema/version marker
+- `#`, the document version
+
+The top-level `#` in `patch-details` confirms the old document version. The caller cannot declare the new `#` value, test `/#`, or patch `/#`; the server creates the next document version.
+
+This restriction applies to user-submitted access-language patches. Internal SOT-authored replication work may carry the resulting `/#` change to read members so every replica stores the same document version.
 
 ### Patch Returns
 
@@ -386,7 +410,7 @@ read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true}
 ```
 
 ```text
-patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /Title, value: "The Matrix"}]}
+patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /status, value: released}]}
 ```
 
 ```text
