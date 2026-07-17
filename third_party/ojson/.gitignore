@@ -1,0 +1,31 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Go build output
+bin/
+dist/
+build/
+*.exe
+*.test
+*.out
+
+# Go workspace and vendored dependencies
+go.work
+vendor/
+
+# Coverage and profiling output
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+
+# Local environment files
+.env
+.env.*
+
+# Cursor local project state
+.cursor/

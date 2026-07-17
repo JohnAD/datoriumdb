@@ -7,13 +7,14 @@ For example:
 ```text
 {
   from: 0,
-  to: 1,
   new_ver_id: 01KWHM7R7D3T50G0GH6XN4CRZT,
   updates: [
     {op: add, path: /rating, value: 0, schema: {kind: number, default: 0}}
   ]
 }
 ```
+
+Schema upgrades always advance by exactly one version. The target version is `from + 1`. An explicit `to` field is optional; if present, it must equal `from + 1`.
 
 This update list is not exactly RFC 6902. A schema update manipulates both the schema and the underlying documents at the same time.
 

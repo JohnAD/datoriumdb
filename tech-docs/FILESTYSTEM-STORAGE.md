@@ -101,35 +101,23 @@ $/db/.config/Movies.schema.1.json
 
 Keeping all schema files in `/db/.config` gives the establishment server one place to read the schemas it serves to clients and machines. Keeping versioned schema files preserves schema history, which is expected to be important for later migration and compatibility work.
 
-Database-wide config files in `/db/.config` use a leading `__` prefix to avoid collisions with collection config files. For example, general database config is stored in `__general.json`, server definitions are stored in `__servers.json`, and `shardMap.default` is stored in `__shard-map.json`.
+Database-wide config files in `/db/.config` use a leading `__` prefix to avoid collisions with collection config files. For example, general database config is stored in `__general.json`, server definitions are stored in `__servers.json`, `shardMap.default` is stored in `__shard-map.json`, and public auth trust material is stored in `__auth.json`.
 
 Source-of-truth files and directories use normal names. Non-source-of-truth files and directories are prepended with a period so users can decide whether to track them in Git.
 
-Precompiled search files are stored under `.search`:
+Search definitions are stored under `/db/.config` as `{CollectionName}.search.{SearchName}.json`. See [SEARCH-DEFINITION-SCHEMA.md](SEARCH-DEFINITION-SCHEMA.md).
+
+Precompiled search *result* trees are stored under `.search` in the collection directory:
 
 ```text
 $/db/Movies/.search/{searchname}
 ```
 
-Each search stores its settings in the search directory:
+For example, encoded result files live under:
 
 ```text
-$/db/Movies/.search/{searchname}/search-settings.json
+$/db/Movies/.search/byReleasedGenre/{encodedPath}/matches.json
 ```
-
-The current search settings are also stored with their version number:
-
-```text
-$/db/Movies/.search/{searchname}/search-settings.{ver}.json
-```
-
-For example:
-
-```text
-$/db/Movies/.search/byReleasedGenre/search-settings.1.json
-```
-
-The unversioned `search-settings.json` file lets everyday use load the current search settings with a single known file read rather than searching for the latest versioned file.
 
 Cached data for documents is stored under `.cache`:
 
@@ -157,12 +145,12 @@ The key assumption is that files have both a universal file ID and a filename. T
 
 For example, when DatoriumDB wants to update `foo.json`, it does not rewrite `foo.json` in place. Instead, it:
 
-1. Creates a new temporary file in the operating system's `/tmp` area.
+1. Creates a new temporary file in the same directory as the target file.
 2. Writes the full new file content to that temporary file.
-3. Ensures the temporary file is saved.
-4. Issues a filesystem move operation to move the temporary file to the target directory and filename, such as `foo.json`.
+3. Ensures the temporary file is flushed.
+4. Issues a filesystem rename operation onto the target filename, such as `foo.json`.
 
-The temporary file has a new file ID and a quasi-random filename while it is being written. Once the move occurs, new processes opening `foo.json` attach to the new file ID.
+Same-directory rename is required so the replace is atomic on ordinary POSIX filesystems. The temporary file has a new file ID and a quasi-random filename while it is being written. Once the rename occurs, new processes opening `foo.json` attach to the new file ID.
 
 Processes that already had the old `foo.json` open continue reading the old file ID. They do not see the file change underneath them. The old file ID is moved to the operating system's equivalent of a trash or unlinked state, but it is not removed while existing readers still have it open.
 

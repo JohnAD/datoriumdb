@@ -1,0 +1,12 @@
+{
+  "collection": "Movies",
+  "command": "create",
+  "errors": [
+    {
+      "code": "invalidDocumentId",
+      "message": "document id is invalid or unsafe for filesystem storage"
+    }
+  ],
+  "id": "\"not/safe\"",
+  "ok": false
+}

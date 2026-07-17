@@ -24,13 +24,13 @@ The `<detail>` section is a pseudo-JSON object. It follows JSON-like structure, 
 For example, this:
 
 ```text
-create Movies null {$: Movies:1, Title: "The Matrix", Year: 1999}
+create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
 ```
 
 is equivalent to:
 
 ```text
-create Movies null {"$": "Movies:1", "Title": "The Matrix", "Year": 1999}
+create Movies null {"$": "Movies:0", "title": "The Matrix", "releaseYear": 1999}
 ```
 
 ## Commands
@@ -41,10 +41,52 @@ The initial access command set is:
 - `read` reads an existing document.
 - `patch` changes an existing document through explicit patch operations.
 - `delete` deletes an existing document.
+- `search` reads a precompiled search result list.
 
 There is no `update` command. Blind whole-document updates are bad practice because they can overwrite data unintentionally and bypass the more precise patch model.
 
 Collection creation and schema upgrades are administrative operations, not access-language commands. They are performed through command-line tools that validate and update the establishment config files.
+
+## HTTP Transport
+
+Smart clients submit access-language commands over HTTP:
+
+```text
+POST /datoriumdb/v1/command
+Content-Type: text/plain; charset=utf-8
+Authorization: Bearer {token}
+```
+
+The request body is exactly one access-language command line:
+
+```text
+create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
+```
+
+The response is always HTTP `200` with `Content-Type: application/json` and a DatoriumDB result envelope.
+
+The command layer remains separate from this transport. Later transports may carry the same command text and envelope shape.
+
+Wrong-machine refusals use `ok: false` with a stable error code such as `wrongMachine` and include enough routing information for the client to retry:
+
+```text
+{
+  ok: false,
+  command: create,
+  collection: Movies,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
+  errors: [
+    {
+      code: wrongMachine,
+      message: "This server is not assigned to the target shard.",
+      shardSlot: "7A",
+      correctServer: "serverB",
+      baseURL: "https://s32.datoriumdb.com",
+      configVersion: 12
+    }
+  ]
+}
+```
 
 ## API Response Shape
 
@@ -76,16 +118,17 @@ The four command parts are:
 The collection and schema are validated before the document is created:
 
 - If the collection does not exist, the command returns an error.
-- If `{content}` does not include a `$` schema/version marker, the command returns an error.
-- If the `$` schema/version marker does not match the collection's current schema, the command returns an error.
-- If the schema version in `$` is wrong, the command returns an error.
+- The schema/version marker uses `{CollectionName}:{schemaVersion}`. New collections start at schema version `0`, so a new `Movies` document uses `$: Movies:0`.
+- If `{content}` omits `$`, the server fills it with the collection's current schema marker.
+- If `{content}` includes `$`, it must match the collection's current schema marker.
+- Write commands may include a client-supplied `operationId` ULID in the detail object for retry-safe idempotency. If omitted, the server generates one.
 
 The database owns some document metadata fields:
 
 - The document ID is taken from `{id}`.
 - If `{id}` is `null`, the database automatically creates a ULID.
 - If `{content}` includes an ID in the `!` field, it must match `{id}` unless `{id}` is `null`.
-- `{content}` MUST include a schema/version marker in the `$` field.
+- If `{content}` omits `!`, the server fills it from the final document ID.
 - `{content}` cannot include a `#` version field because document versions are created by the database.
 
 ### Create Returns
@@ -100,8 +143,9 @@ On success, it returns command metadata and the newly created document version:
   command: create,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
-  $: Movies:1,
-  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK
+  $: Movies:0,
+  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT
 }
 ```
 
@@ -118,8 +162,8 @@ On failure, it returns `ok: false` and an `errors` array:
       code: schemaMismatch,
       path: /$,
       message: "Document schema marker does not match the collection schema.",
-      expected: Movies:1,
-      actual: Movies:0
+      expected: Movies:0,
+      actual: Movies:1
     }
   ]
 }
@@ -169,7 +213,7 @@ For example:
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   sot: {
     !: 01KWD65CFQPEZS7H1WJE4MK990,
-    $: Movies:1,
+    $: Movies:0,
     #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
     title: "The Matrix",
     status: released,
@@ -267,12 +311,14 @@ The four command parts are:
 
 The patch details object MUST include the `$` schema/version marker and the `#` document version field at the top level. This prevents blind patches by requiring the caller to confirm both the current schema and the exact version of the document being changed.
 
+Write commands may include a client-supplied `operationId` ULID for retry-safe idempotency. If omitted, the server generates one.
+
 The initial patch operation format is based on RFC 6902 JSON Patch. To leave room for additional patch forms later, the RFC 6902 operation array is stored directly under an `RFC6902` field.
 
 For example:
 
 ```text
-patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /status, value: released}]}
+patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:0, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, operationId: 01KWHM7R7D3T50G0GH6XN4CRZT, RFC6902: [{op: replace, path: /status, value: released}]}
 ```
 
 The `RFC6902` field contains a JSON Patch operation list.
@@ -299,7 +345,8 @@ On success, it returns command metadata and the document versions before and aft
   command: patch,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
-  $: Movies:1,
+  $: Movies:0,
+  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT,
   versions: {
     before: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
     after: 01KWD65EJ5F61CE0GS9SX4V4FT
@@ -344,10 +391,12 @@ The four command parts are:
 
 The confirming details object MUST include the `#` document version field. This prevents blind deletes by requiring the caller to confirm the exact version of the document being removed.
 
+Write commands may include a client-supplied `operationId` ULID for retry-safe idempotency. If omitted, the server generates one.
+
 For example:
 
 ```text
-delete Movies 01KWD65CFQPEZS7H1WJE4MK990 {#: 01KWD65D94Y5M8C2Z7HJ3N6VQK}
+delete Movies 01KWD65CFQPEZS7H1WJE4MK990 {#: 01KWD65D94Y5M8C2Z7HJ3N6VQK, operationId: 01KWHM7R7D3T50G0GH6XN4CRZT}
 ```
 
 ### Delete Returns
@@ -362,7 +411,8 @@ On success, it returns command metadata and the deleted document version:
   command: delete,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
-  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK
+  #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
+  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT
 }
 ```
 
@@ -399,10 +449,50 @@ Values inside the detail object are interpreted using these rules:
 
 Strings may use quotes, but quotes are not required unless the string contains spaces or would otherwise be interpreted as a non-string value.
 
+## Search
+
+The `search` command reads a precompiled search result list.
+
+```text
+search {collection} {searchName} {search-parms}
+```
+
+The four command parts are:
+
+- `search` is the command word.
+- `{collection}` is the collection that owns the search definition.
+- `{searchName}` is the precompiled search name.
+- `{search-parms}` is an object of live variables required by the search definition.
+
+For example:
+
+```text
+search Movies byReleasedGenre {status: released, useGenreFilter: true, genre: scifi}
+```
+
+The server computes the search shard from the encoded search parameter path, accepts or refuses the command based on shard ownership, and returns the matching document IDs from `matches.json`. Constant multi-value `in` clauses require their live selector variable so the request resolves one result bucket.
+
+On success:
+
+```text
+{
+  ok: true,
+  command: search,
+  collection: Movies,
+  search: byReleasedGenre,
+  matches: [
+    01KWD65CFQPEZS7H1WJE4MK990,
+    01KWD65EJ5F61CE0GS9SX4V4FT
+  ]
+}
+```
+
+Search definitions are created and deleted through `datoriumctl`, not through the access language. Search result maintenance is eventual through the change-agent.
+
 ## Examples
 
 ```text
-create Movies null {$: Movies:1, Title: "The Matrix", Year: 1999}
+create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
 ```
 
 ```text
@@ -410,11 +500,15 @@ read Movies 01KWD65CFQPEZS7H1WJE4MK990 {extraFields: true, cacheSummaries: true}
 ```
 
 ```text
-patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:1, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /status, value: released}]}
+patch Movies 01KWD65CFQPEZS7H1WJE4MK990 {$: Movies:0, #: 01KWD65D94Y5M8C2Z7HJ3N6VQK, RFC6902: [{op: replace, path: /status, value: released}]}
 ```
 
 ```text
 delete Movies 01KWD65CFQPEZS7H1WJE4MK990 {#: 01KWD65D94Y5M8C2Z7HJ3N6VQK}
+```
+
+```text
+search Movies byReleasedGenre {status: released, useGenreFilter: true, genre: scifi}
 ```
 
 ## Design Notes

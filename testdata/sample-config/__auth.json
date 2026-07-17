@@ -1,0 +1,24 @@
+{
+  "auth": {
+    "issuer": "http://127.0.0.1:8080",
+    "audience": "datoriumdb",
+    "tokenLifetimeSeconds": {
+      "client": 3600,
+      "machine": 3600
+    },
+    "keys": [
+      {
+        "kid": "dev-primary",
+        "alg": "EdDSA",
+        "status": "active",
+        "publicKey": "Oc1DN2HnFecoV7wJ9uP2vg3jv/NbvXms4YQu7x4YLWM="
+      },
+      {
+        "kid": "dev-old",
+        "alg": "EdDSA",
+        "status": "retired",
+        "publicKey": "xGqLfwRtWtywL6rdVFP5u6tVFWMXgj0zRLut/1umR+E="
+      }
+    ]
+  }
+}

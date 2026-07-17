@@ -58,7 +58,9 @@ Conceptually:
   general: { ... },
   servers: { ... },
   shardMap: { ... },
-  schemas: { ... }
+  schemas: { ... },
+  searches: { ... },
+  auth: { ... }
 }
 ```
 
@@ -78,8 +80,11 @@ The first concrete config files are:
 /db/.config/__general.json
 /db/.config/__servers.json
 /db/.config/__shard-map.json
+/db/.config/__auth.json
 /db/.config/{CollectionName}.schema.json
 /db/.config/{CollectionName}.schema.{ver}.json
+/db/.config/{CollectionName}.search.{SearchName}.json
+/db/.config/{CollectionName}.search.{SearchName}.{ver}.json
 ```
 
 Files beginning with `__` are database-wide config files. The prefix prevents name collisions with collection-owned config files.
@@ -90,9 +95,13 @@ Files beginning with `__` are database-wide config files. The prefix prevents na
 
 `__shard-map.json` contains the `shardMap` object. For the MVP, it contains a `default` map used for all collections.
 
+`__auth.json` contains public authentication trust material such as issuer, audience, token lifetime defaults, and public signing keys. Private signing keys and bootstrap secrets do not belong in this file. See [AUTHENTICATION.md](AUTHENTICATION.md).
+
 `{CollectionName}.schema.json` contains the current schema for a collection.
 
 `{CollectionName}.schema.{ver}.json` preserves a versioned copy of a collection schema.
+
+`{CollectionName}.search.{SearchName}.json` contains the current search definition for a precompiled search. Versioned copies use `{CollectionName}.search.{SearchName}.{ver}.json`. Current search definitions are included in the establishment response under `searches`.
 
 For the MVP, collection config files remain flat under `/db/.config`. Per-collection subdirectories can be added later if collection-level config grows enough to justify the extra structure.
 
@@ -294,6 +303,8 @@ A server entry should identify a specific DatoriumDB server endpoint. It should 
 
 The default collection storage path on each server is `/db/{CollectionName}`. A server can map that local path to a different mounted drive, directory, or storage device, but that is local server administration. The establishment config should not describe per-server storage paths.
 
+When `datoriumctl collection create` runs, it creates the empty local collection directory on that machine as soon as the schema is written. When other `datoriumdb` servers fetch or refresh establishment config and learn about a collection they do not yet have locally, they create the missing `/db/{CollectionName}` directory immediately. Directory creation is idempotent.
+
 ## Server Startup
 
 When any DatoriumDB server starts, regardless of role, it must receive two startup parameters:
@@ -344,7 +355,7 @@ Shard role assignment is stored in `shardMap`, not duplicated into each server e
 
 This avoids maintaining a reverse mapping from server to shard roles.
 
-Every machine role should call the establishment server for configuration updates. Non-establishment servers update their local `/db/.config` files from the establishment response.
+Every machine role should call the establishment server for configuration updates. Non-establishment servers update their local `/db/.config` files from the establishment response and create any missing local collection storage directories named by that config.
 
 ## Client Routing
 
@@ -385,7 +396,7 @@ They should also refresh when:
 - a connection to an expected target fails repeatedly
 - an establishment config expiration time is reached
 
-The exact refresh interval is still to be determined.
+A reasonable MVP refresh policy is event-driven refresh plus a periodic poll every `60` seconds.
 
 Establishment config file updates should be made through a command-line tool, not by directly editing files in `/db/.config`.
 
@@ -416,8 +427,11 @@ The MVP should support:
 - config files under `/db/.config`
 - server definitions in `/db/.config/__servers.json`
 - `shardMap.default` in `/db/.config/__shard-map.json`
+- public auth trust material in `/db/.config/__auth.json`
 - collection schemas in `/db/.config/{CollectionName}.schema.json`
 - versioned collection schemas in `/db/.config/{CollectionName}.schema.{ver}.json`
+- search definitions in `/db/.config/{CollectionName}.search.{SearchName}.json`
+- current search definitions in the establishment response
 - config versioning
 - command-line config updates
 
@@ -431,8 +445,6 @@ The MVP does not need:
 
 ## Open Questions
 
-- What authentication method should be used first?
-- What is the exact serialized config format?
 - Should config be signed so clients can verify it independently?
 - Should the establishment server be replicated?
-- How do clients discover the establishment server itself?
+- How do clients discover the establishment server itself beyond the startup base URL?

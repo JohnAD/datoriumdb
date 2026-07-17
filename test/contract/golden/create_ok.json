@@ -1,0 +1,9 @@
+{
+  "#": "<ID:1>",
+  "$": "Movies:0",
+  "collection": "Movies",
+  "command": "create",
+  "id": "<ID:2>",
+  "ok": true,
+  "operationId": "<ID:3>"
+}

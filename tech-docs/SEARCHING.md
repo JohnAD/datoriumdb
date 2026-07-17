@@ -4,7 +4,7 @@ DatoriumDB does not support open-ended searches across arbitrary fields. Searche
 
 This document currently assumes the filesystem-backed `plain-text-json` storage method.
 
-The core idea is that `create`, `patch`, and `delete` operations update both the source document and any stored search files affected by that document. Reads against a search should therefore be fast because the search result structure already exists.
+Document writes commit the source document first. The change-agent later updates any stored search result files affected by that document. Reads against a search are still fast because the search result structure already exists; search results are eventually correct relative to recent writes.
 
 ## Goals
 
@@ -30,21 +30,21 @@ Movies.byYear
 
 ## Search Definitions (v1)
 
-Precompiled searches are declared explicitly. The MVP search model supports AND'ed clauses only.
+Precompiled searches are declared explicitly through `datoriumctl search create`, not through the access language. The MVP search model supports AND'ed clauses only.
 
-For example:
+For example, an operator installs a search definition file that declares `byReleasedGenre` for the `Movies` collection. Live clients then call:
 
 ```text
-compile Movies byReleasedGenre {v1: {clauses: [{field: /status, op: equals, value: $status}, {field: /genre, op: in, value: [scifi, fantasy], truth: $useGenreFilter}, {field: /highRated, op: equals, value: true}], sort: [{field: /releaseYear, dir: desc}, {field: /title, dir: asc}, {field: "/!", dir: asc}]}}
+search Movies byReleasedGenre {status: released, useGenreFilter: true, genre: scifi}
 ```
-
-This declares a `byReleasedGenre` search for the `Movies` collection.
 
 The clauses are evaluated as an AND:
 
 - `status` must equal the provided `$status`.
-- if `$useGenreFilter` is `true`, `genre` must be either `scifi` or `fantasy`.
+- if `$useGenreFilter` is `true`, `genre` must equal the provided live selector `$genre`, and `$genre` must be one of the definition's allowed constants such as `scifi` or `fantasy`.
 - `highRated` must be `true`.
+
+A constant multi-value `in` clause always requires a live selector variable when the query enables that clause. The server resolves exactly one encoded result bucket per request and does not union buckets implicitly.
 
 The sort definition determines the stored order of document IDs inside matching search result files.
 
@@ -56,7 +56,7 @@ A **constant** is a search parameter fixed when the search is defined.
 
 A **variable** is a search parameter provided when a live query uses the precompiled search.
 
-Variables are written with a leading `$` in search definitions. For example, `$status` and `$genres` are variables in the `byReleasedGenre` example above.
+Variables are written with a leading `$` in search definitions. For example, `$status`, `$useGenreFilter`, and `$genre` are variables in the `byReleasedGenre` example above.
 
 Constants and variables both keep searches precompiled. A constant narrows the search definition itself. A variable selects among the stored search result files that the precompiled search maintains.
 
@@ -202,10 +202,16 @@ For each affected search, the database eventually updates the stored search file
 Write operations should follow this general pattern:
 
 1. Load the current document state, if any.
-2. Apply the requested create, patch, or delete.
-3. Compare old and new values for fields used by precompiled searches.
-4. Stage updated document files and search files.
-5. Send search result patches to the SOT machines for the affected search shards.
+2. Apply the requested create, patch, or delete to source-of-truth storage.
+3. Replicate the document write according to [REPLICATION-FAILURE-HANDLING.md](REPLICATION-FAILURE-HANDLING.md).
+4. Enqueue change-agent work for affected searches and caches.
+5. Return success for the document write. Search maintenance is not part of the synchronous document commit.
+
+The change-agent later:
+
+1. Compares old and new values for fields used by precompiled searches.
+2. Sends search result patches to the SOT machines for the affected search shards.
+3. Those search SOTs apply and replicate the search-result files.
 
 ## Create
 
@@ -266,6 +272,5 @@ Initial search support can be limited to:
 
 ## Open Questions
 
-- How should searches be declared in the access language?
-- Should search result lists store document IDs only, or cached summaries as well?
-- How should search maintenance failures be recovered after an interrupted write?
+- Should search result lists eventually store cached summaries as well as document IDs?
+- Should pending search-result delivery use the same on-disk pending-work pattern as document writes?

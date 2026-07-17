@@ -228,7 +228,7 @@ DatoriumDB owns these document metadata fields:
 - `$` is the schema/version marker.
 - `#` is the document version.
 
-When creating documents, DatoriumDB can automatically create `!` and `$` if they are missing. User-supplied document content cannot include `#`, because document versions are created by the database.
+When creating documents, if `!` or `$` is missing, DatoriumDB fills them automatically: `!` from the final document ID, and `$` from the collection's current schema marker (`{CollectionName}:{schemaVersion}`). New collections start at schema version `0`. If the client supplies `$`, it must match the current schema marker. User-supplied document content cannot include `#`, because document versions are created by the database.
 
 ## Example Collection Schema
 

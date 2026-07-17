@@ -1,0 +1,9 @@
+{
+  "kind": "object",
+  "children": [
+    {"name": "title", "kind": "string", "required": true},
+    {"name": "releaseYear", "kind": "number", "integer": true},
+    {"name": "status", "kind": "string"},
+    {"name": "highRated", "kind": "boolean", "default": false}
+  ]
+}

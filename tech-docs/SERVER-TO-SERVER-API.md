@@ -21,7 +21,9 @@ Server-to-server endpoints live under:
 /datoriumdb/v1/sys
 ```
 
-`QUERY` is used for list-style reads that need a structured request body. It does not change server state.
+`QUERY` is used for list-style reads that need a structured request body. It does not change server state. For the MVP HTTP implementation, `QUERY` is carried as `POST` with `Content-Type: application/json` and the same path; the method name in this document describes the operation semantics.
+
+`POST` is used for happy-path push delivery from an SOT-member to a read member.
 
 `GET` fetches one work item.
 
@@ -61,6 +63,79 @@ Failed API calls also return HTTP `200`, but with `ok: false` and an `errors` ar
 ```
 
 Transport-level failures can still occur when the server cannot be reached or the HTTP request itself cannot be processed. Once an API endpoint is able to return a DatoriumDB response, success or failure is represented inside the envelope.
+
+## Happy-Path Document Write Delivery
+
+On the happy path, a `SHARD_SOT_MEMBER` pushes a write to each read member before creating any `.pendingWrites` file.
+
+```text
+POST /datoriumdb/v1/sys/apply-document-write
+```
+
+Request body:
+
+```json
+{
+  "targetServer": "serverB",
+  "item": {
+    "collection": "Movies",
+    "id": "01KWDRHGK2GXE2B0VZ85GT546T",
+    "beforeVersion": "01KWDRJ2PB2MTZ2VZ9V6F6Q4FV",
+    "afterVersion": "01KWDRK4X3AV9BN9MZ3EY4Y2K8",
+    "operationId": "01KWDRK4X7F1M9W5K0D9S1P3QH",
+    "command": "patch",
+    "patch": [
+      {"op": "replace", "path": "/status", "value": "released"},
+      {"op": "replace", "path": "/#", "value": "01KWDRK4X3AV9BN9MZ3EY4Y2K8"}
+    ]
+  }
+}
+```
+
+The `item` object uses the same shape as a pending document write work item. Application is idempotent by `operationId`.
+
+On success:
+
+```text
+{
+  ok: true,
+  applied: true,
+  operationId: 01KWDRK4X7F1M9W5K0D9S1P3QH
+}
+```
+
+If the read member does not acknowledge within the SOT timeout, the SOT-member creates the matching `.pendingWrites` file and continues. See [REPLICATION-FAILURE-HANDLING.md](REPLICATION-FAILURE-HANDLING.md).
+
+## Happy-Path Search Result Delivery
+
+Search-result replication uses the same push-then-pending pattern.
+
+```text
+POST /datoriumdb/v1/sys/apply-search-result-write
+```
+
+Request body:
+
+```json
+{
+  "targetServer": "serverB",
+  "item": {
+    "collection": "Movies",
+    "search": "byReleasedGenre",
+    "path": "/status/released/genre/scifi",
+    "beforeVersion": "01KWDRJ2PB2MTZ2VZ9V6F6Q4FV",
+    "afterVersion": "01KWDRK4X3AV9BN9MZ3EY4Y2K8",
+    "operationId": "01KWDRK4X7F1M9W5K0D9S1P3QH",
+    "command": "patch",
+    "patch": [
+      {"op": "add", "path": "/matches/-", "value": "01KWDRHGK2GXE2B0VZ85GT546T"},
+      {"op": "replace", "path": "/#", "value": "01KWDRK4X3AV9BN9MZ3EY4Y2K8"}
+    ]
+  }
+}
+```
+
+Application is idempotent by `operationId`. Timeout fallback may use pending search-result work under the search directory in a later refinement; for MVP, the SOT may retry push delivery and rely on the change-agent's retryable nature.
 
 ## Pending Writes
 

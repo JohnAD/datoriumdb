@@ -6,9 +6,7 @@ Search definitions describe precompiled searches. They are not live query object
 
 ## Storage
 
-Search definitions should be stored as config files under `/db/.config`.
-
-Tentative filenames:
+Search definitions are stored as establishment config files under `/db/.config`:
 
 ```text
 /db/.config/{CollectionName}.search.{SearchName}.json
@@ -17,7 +15,7 @@ Tentative filenames:
 
 The unversioned file stores the current search definition. The versioned file preserves search definition history.
 
-The exact filename convention can still change, but search definitions belong with the other establishment-served config because smart clients and servers need to understand them.
+Search definitions belong with the other establishment-served config because smart clients and servers need them to compute search shards and route `search` commands. Search *result* trees remain under the collection storage directory as `/db/{CollectionName}/.search/{SearchName}/...`. See [FILESTYSTEM-STORAGE.md](FILESTYSTEM-STORAGE.md).
 
 The collection name and search name are sufficient to identify a stored search definition and its stored search directories.
 
@@ -42,7 +40,7 @@ Conceptually:
   "v1": {
     "clauses": [
       {"field": "/status", "op": "equals", "value": "$status"},
-      {"field": "/genre", "op": "in", "value": ["scifi", "fantasy"], "truth": "$useGenreFilter"},
+      {"field": "/genre", "op": "in", "value": ["scifi", "fantasy"], "truth": "$useGenreFilter", "select": "$genre"},
       {"field": "/highRated", "op": "equals", "value": true}
     ],
     "sort": [
@@ -85,6 +83,10 @@ Most clauses also have:
 Some constant-value clauses also have:
 
 - `truth`: a live truth variable.
+
+Constant multi-value `in` clauses also have:
+
+- `select`: a live selector variable whose value must be one of the allowed constants in `value`. The live query resolves exactly one encoded result bucket.
 
 ## Field Paths
 
@@ -188,8 +190,8 @@ A stored search definition is invalid if:
 - any constant option is supplied with a variable value.
 - `sort` refers to a non-schema field, except for the final `!` tie-breaker.
 
-## Open Questions
+## Establishment Publication
 
-- Should search definition files be versioned with an integer, a ULID, or the establishment config version?
-- Should search definition file names include the search version?
-- Should search definitions be included directly in the combined establishment response?
+Current search definitions are included in the combined establishment response under `searches`, grouped by collection and search name. Historic versioned search definition files are not included in that response.
+
+Search definition versions use a positive integer in the definition document and in `{CollectionName}.search.{SearchName}.{ver}.json`. For the MVP, creating a search writes version `1`.

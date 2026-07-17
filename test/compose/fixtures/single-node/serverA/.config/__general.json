@@ -1,0 +1,10 @@
+{
+  "general": {
+    "name": "DatoriumDB Compose Single Node",
+    "establishmentServer": "serverA",
+    "version": 1,
+    "readMemberCheckinSeconds": 10,
+    "cacheUpdateCheckinSeconds": 60,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
+}

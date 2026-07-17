@@ -56,16 +56,20 @@ For example:
 
 ```json
 {
-  "operationId": "01KXYZ...",
-  "targetServer": "serverB",
-  "shardSlot": "7A",
+  "operationId": "01KXYZOPERATION000000000001",
   "collection": "Movies",
   "id": "01KWDRHGK2GXE2B0VZ85GT546T",
-  "documentVersion": "01KXYZ...",
-  "patch": [],
-  "state": "pending"
+  "beforeVersion": "01KXYZBEFORE00000000000001",
+  "afterVersion": "01KXYZAFTER000000000000001",
+  "command": "patch",
+  "patch": [
+    {"op": "replace", "path": "/status", "value": "released"},
+    {"op": "replace", "path": "/#", "value": "01KXYZAFTER000000000000001"}
+  ]
 }
 ```
+
+Presence of the file under `.pendingWrites/` means the work is pending. A separate `state` field is not required.
 
 Each read-member can then run a catch-up agent:
 
@@ -248,7 +252,7 @@ Examples:
 - invalid command parameters
 - schema validation failure
 - version conflict
-- permission failure
+- authentication failure
 - local SOT storage failure
 - local SOT write verification failure
 

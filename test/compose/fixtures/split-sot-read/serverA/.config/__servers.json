@@ -1,0 +1,6 @@
+{
+  "servers": {
+    "serverA": {"baseURL": "http://serverA:8080"},
+    "serverB": {"baseURL": "http://serverB:8080"}
+  }
+}

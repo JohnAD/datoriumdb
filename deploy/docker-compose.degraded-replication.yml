@@ -1,0 +1,86 @@
+# Degraded-replication DatoriumDB topology: same shape as proxy-read
+# (serverA=SOT/establishment, serverB=read, analysisA=proxy) but tuned
+# with short check-in intervals so a manual degrade/recover drill is fast
+# to observe (tech-docs/REPLICATION-FAILURE-HANDLING.md).
+#
+# Quick start (from the repository root):
+#   docker compose -f deploy/docker-compose.degraded-replication.yml up --build -d
+#
+# Manual degrade/recover drill:
+#   docker compose -f deploy/docker-compose.degraded-replication.yml stop serverB
+#   # writes to serverA now return ok:true plus a "note" naming serverB as
+#   # unacknowledged, and a durable pending write is recorded on serverA.
+#   docker compose -f deploy/docker-compose.degraded-replication.yml start serverB
+#   # serverB's catch-up loop (readMemberCheckinSeconds: 3 in this
+#   # topology's fixture) applies the pending write within a few seconds.
+#
+# Config source: test/compose/fixtures/degraded-replication/serverA/.config
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: datoriumdb:local
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 10s
+
+services:
+  serverA:
+    <<: *node
+    command: ["serverA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      DATORIUMDB_SIGNING_KEY_FILE: /run/secrets/signing_key
+    secrets:
+      - bootstrap_secret
+      - signing_key
+    volumes:
+      - serverA_data:/db
+      - ../test/compose/fixtures/degraded-replication/serverA/.config:/db/.config
+    ports:
+      - "8080:8080"
+
+  serverB:
+    <<: *node
+    command: ["serverB", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+    secrets:
+      - bootstrap_secret
+    volumes:
+      - serverB_data:/db
+    ports:
+      - "8081:8080"
+    depends_on:
+      serverA:
+        condition: service_healthy
+
+  analysisA:
+    <<: *node
+    command: ["analysisA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+    secrets:
+      - bootstrap_secret
+    volumes:
+      - analysisA_data:/db
+    ports:
+      - "8082:8080"
+    depends_on:
+      serverA:
+        condition: service_healthy
+
+secrets:
+  bootstrap_secret:
+    file: ./secrets/bootstrap-secret.txt
+  signing_key:
+    file: ../testdata/sample-config/dev-signing-key.pem
+
+volumes:
+  serverA_data:
+  serverB_data:
+  analysisA_data:

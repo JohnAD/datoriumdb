@@ -1,0 +1,31 @@
+{
+  "shardMap": {
+    "default": {
+      "00-33": {
+        "SHARD_SOT_MEMBER": "server1",
+        "SHARD_READ_MEMBER": ["server1"],
+        "PROXY_READ_MEMBER": []
+      },
+      "34-66": {
+        "SHARD_SOT_MEMBER": "server2",
+        "SHARD_READ_MEMBER": ["server2"],
+        "PROXY_READ_MEMBER": []
+      },
+      "67-99": {
+        "SHARD_SOT_MEMBER": "server3",
+        "SHARD_READ_MEMBER": ["server3"],
+        "PROXY_READ_MEMBER": []
+      },
+      "9A-CC": {
+        "SHARD_SOT_MEMBER": "server4",
+        "SHARD_READ_MEMBER": ["server4"],
+        "PROXY_READ_MEMBER": []
+      },
+      "CD-FF": {
+        "SHARD_SOT_MEMBER": "server5",
+        "SHARD_READ_MEMBER": ["server5"],
+        "PROXY_READ_MEMBER": []
+      }
+    }
+  }
+}

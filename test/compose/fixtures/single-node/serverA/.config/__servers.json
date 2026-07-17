@@ -1,0 +1,7 @@
+{
+  "servers": {
+    "serverA": {
+      "baseURL": "http://serverA:8080"
+    }
+  }
+}

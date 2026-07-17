@@ -1,0 +1,15 @@
+{
+  "collection": "Movies",
+  "command": "create",
+  "errors": [
+    {
+      "actual": "Movies:99",
+      "code": "schemaMismatch",
+      "expected": "Movies:0",
+      "message": "Document schema marker does not match the collection schema.",
+      "path": "/$"
+    }
+  ],
+  "id": "<ID:1>",
+  "ok": false
+}

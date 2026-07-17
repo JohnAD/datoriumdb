@@ -12,7 +12,7 @@ The background agent handles this distribution work after any source-of-truth ch
 
 ## Queue
 
-The agent runs periodically by any mechanism supported by the database. For this document, assume the agent runs once per minute from a cron job. This document also assumes plain JSON text storage.
+The agent runs inside the `datoriumdb` process through the in-process scheduler described in [LOCAL-ARCHITECTURE.md](LOCAL-ARCHITECTURE.md). Wake channels and periodic safety scans both drive work. This document assumes plain JSON text storage.
 
 When the agent runs, it reads the `.changeQueue` directory under the collection storage location. This directory contains empty files with crafted names.
 
@@ -64,7 +64,7 @@ Read members apply those work items to existing local cache files. They do not s
 
 Search distribution computes precompiled search file changes for the changed document's own collection.
 
-The `change-agent` reads the current search settings under the changed collection's `.search` directory. Each search definition is evaluated against both the previous document state, if present, and the current document state, if present.
+The `change-agent` reads current search definitions from establishment config under `/db/.config/{CollectionName}.search.{SearchName}.json`. Search result trees under the collection's `.search` directory are updated from those definitions. Each search definition is evaluated against both the previous document state, if present, and the current document state, if present.
 
 For each search definition, the agent determines whether the document should appear in one or more search result files:
 

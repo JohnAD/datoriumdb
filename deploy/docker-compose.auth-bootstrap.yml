@@ -1,0 +1,93 @@
+# Auth-bootstrap DatoriumDB topology: focuses on the machine
+# bootstrap/token flow from tech-docs/AUTHENTICATION.md. serverA is the
+# establishment server holding the Ed25519 signing key; serverB has no
+# local config at all and must bootstrap a machine token with the shared
+# secret, then fetch GET /datoriumdb/v1/establish before it can serve
+# anything.
+#
+# Quick start (from the repository root):
+#   docker compose -f deploy/docker-compose.auth-bootstrap.yml up --build
+#   curl http://127.0.0.1:8080/datoriumdb/v1/health
+#
+# Negative-case drill: start serverB-bad-secret (which points at the same
+# establishment server but is given the wrong bootstrap secret) and watch
+# it fail to bootstrap and exit, proving the secret is actually checked:
+#   docker compose -f deploy/docker-compose.auth-bootstrap.yml --profile bad-secret up serverB-bad-secret
+#
+# Config source: test/compose/fixtures/auth-bootstrap/serverA/.config
+
+services:
+  serverA:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: datoriumdb:local
+    command: ["serverA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      DATORIUMDB_SIGNING_KEY_FILE: /run/secrets/signing_key
+    secrets:
+      - bootstrap_secret
+      - signing_key
+    volumes:
+      - serverA_data:/db
+      - ../test/compose/fixtures/auth-bootstrap/serverA/.config:/db/.config
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  serverB:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: datoriumdb:local
+    command: ["serverB", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+    secrets:
+      - bootstrap_secret
+    volumes:
+      - serverB_data:/db
+    ports:
+      - "8081:8080"
+    depends_on:
+      serverA:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Deliberately wrong bootstrap secret: demonstrates that a machine that
+  # cannot authenticate never becomes healthy (main.go calls
+  # log.Fatalf and the process exits instead of serving traffic). Only
+  # started when explicitly requested via `--profile bad-secret`.
+  serverB-bad-secret:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: datoriumdb:local
+    profiles: ["bad-secret"]
+    command: ["serverB", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET: "this-is-not-the-right-secret"
+    depends_on:
+      serverA:
+        condition: service_healthy
+
+secrets:
+  bootstrap_secret:
+    file: ./secrets/bootstrap-secret.txt
+  signing_key:
+    file: ../testdata/sample-config/dev-signing-key.pem
+
+volumes:
+  serverA_data:
+  serverB_data:

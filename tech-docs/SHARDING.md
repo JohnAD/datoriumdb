@@ -28,22 +28,21 @@ The shard hash is applied to each document's ID prefix. This is the part of the 
 
 By assigning shards this way, documents that are likely to be accessed together can be purposely routed to the same shard. For example, if the same system that accesses user document `01KWJYMCTDNTF4MKNHD92FWPGW` is also likely to access that user's settings and mailbox documents, those related documents can use IDs like `01KWJYMCTDNTF4MKNHD92FWPGW.01KWJYMCTDNTF4MKNHD92FWPGW`. The shared prefix routes those documents to the same shard.
 
-## Tentative Full-Replica Model
+## MVP Shard-Local Storage Model
 
-The current tentative plan is that sharding controls write authority more than storage availability.
+For the MVP, sharding controls both write authority and local storage placement.
 
 In this model:
 
-- every machine may keep a full copy of the database
-- each shard has a small set of machines allowed to accept writes
-- exactly one machine is the current source-of-truth write authority for a shard
-- other machines can receive replicated writes and update their local derived data
-- clients can compute the shard from the document ID prefix
-- if a client sends a write to the wrong machine, that machine refuses the write with an `ok: false` response that includes the correct target
+- each `SHARD_SOT_MEMBER` stores source-of-truth documents only for the shard slots it owns
+- each `SHARD_READ_MEMBER` and `PROXY_READ_MEMBER` stores replicas only for the shard slots assigned to it
+- exactly one machine is the current source-of-truth write authority for a shard slot
+- clients compute the 8-bit shard slot from the document ID prefix
+- if a client sends a command to the wrong machine, that machine refuses with an `ok: false` response that includes the correct target
 
-This means a shard is primarily a write-authority boundary.
+Writes go to the `SHARD_SOT_MEMBER` for the target document's shard. Reads and searches go to an assigned `SHARD_READ_MEMBER`, preferring a local dual-role server when available. `PROXY_READ_MEMBER` servers receive replicated data but are not normal smart-client read targets.
 
-Document reads can be served by any machine that has a sufficiently fresh copy of the data and is assigned to the document's shard. Search reads are routed by the search result shard. Writes must go to the current authority for the target document's shard.
+Full-replica analysis mirrors remain a later option and are not required for MVP.
 
 ## Machine Roles
 
@@ -71,7 +70,7 @@ If two or more machines are assigned to a shard slot, reads and writes are split
 - reads go to `SHARD_READ_MEMBER` machines
 - writes go to the `SHARD_SOT_MEMBER`
 
-A read-member refuses to return a document that is not assigned to one of its shard slots, even if the machine has a full replica of the database.
+A read-member refuses to return a document that is not assigned to one of its shard slots.
 
 If this happens, the smart client should request the latest mapping data from the establishment server and retry against the correct machine.
 
@@ -79,17 +78,15 @@ A read-member also refuses writes unless it is serving both roles for the shard 
 
 Similarly, unless it is serving both roles, an SOT-member only accepts writes for the shard slots assigned to it.
 
-When an SOT-member receives a write, it performs the slow and expensive write operation. It returns success only after it has finished distributing the update to the read-members for that shard slot.
-
-Replication failure handling is described in `REPLICATION-FAILURE-HANDLING.md`.
+When an SOT-member receives a write, it performs the slow and expensive write operation. On the happy path it pushes the write to all read members and waits for acknowledgement with a bounded timeout. If local SOT storage succeeds but one or more read members do not acknowledge in time, the API still returns success, durable `.pendingWrites` entries are recorded, and the response may include a `note`. See [REPLICATION-FAILURE-HANDLING.md](REPLICATION-FAILURE-HANDLING.md).
 
 Direct document references are resolved by smart clients, not by the database during a read response. The client uses the referenced document ID, computes the shard, and reads the referenced document from the correct machine.
 
 Searches are also sharded. The client computes the search shard from the field path used to encode the search parameters and queries the machine assigned to that search shard. Querying the wrong machine returns an `ok: false` error envelope.
 
-Search result updates are routed to the SOT-member for the search shard. The search SOT applies the patch and distributes the updated search result to the search shard's read-members before returning success to the agent.
+Search result updates are routed to the SOT-member for the search shard. The search SOT applies the patch locally, pushes it to the search shard's read-members with the same timeout and pending-work fallback used for document writes, then returns success to the change-agent.
 
-Because search updates are distributed later by agents, searches are eventually correct.
+Because search updates are applied by agents after the source document write commits, searches are eventually correct relative to document writes.
 
 ## Derived Data On Replicas
 

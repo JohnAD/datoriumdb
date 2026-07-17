@@ -1,0 +1,10 @@
+{
+  "general": {
+    "name": "DatoriumDB Local",
+    "establishmentServer": "serverA",
+    "version": 1,
+    "readMemberCheckinSeconds": 10,
+    "cacheUpdateCheckinSeconds": 60,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
+}

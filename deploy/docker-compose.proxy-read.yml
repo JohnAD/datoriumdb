@@ -1,0 +1,82 @@
+# Proxy-read DatoriumDB topology: serverA is the establishment server and
+# SHARD_SOT_MEMBER, serverB is the normal SHARD_READ_MEMBER, and analysisA
+# is a PROXY_READ_MEMBER that receives every replicated write but is not a
+# normal smart-client read target (tech-docs/SHARDING.md,
+# tech-docs/ESTABLISHMENT-CONFIG.md's "Proxy read-members").
+#
+# Quick start (from the repository root):
+#   docker compose -f deploy/docker-compose.proxy-read.yml up --build
+#   curl http://127.0.0.1:8080/datoriumdb/v1/health   # serverA (SOT)
+#   curl http://127.0.0.1:8081/datoriumdb/v1/health   # serverB (read)
+#   curl http://127.0.0.1:8082/datoriumdb/v1/health   # analysisA (proxy)
+#
+# Config source: test/compose/fixtures/proxy-read/serverA/.config
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: datoriumdb:local
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 10s
+
+services:
+  serverA:
+    <<: *node
+    command: ["serverA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      DATORIUMDB_SIGNING_KEY_FILE: /run/secrets/signing_key
+    secrets:
+      - bootstrap_secret
+      - signing_key
+    volumes:
+      - serverA_data:/db
+      - ../test/compose/fixtures/proxy-read/serverA/.config:/db/.config
+    ports:
+      - "8080:8080"
+
+  serverB:
+    <<: *node
+    command: ["serverB", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+    secrets:
+      - bootstrap_secret
+    volumes:
+      - serverB_data:/db
+    ports:
+      - "8081:8080"
+    depends_on:
+      serverA:
+        condition: service_healthy
+
+  analysisA:
+    <<: *node
+    command: ["analysisA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+    secrets:
+      - bootstrap_secret
+    volumes:
+      - analysisA_data:/db
+    ports:
+      - "8082:8080"
+    depends_on:
+      serverA:
+        condition: service_healthy
+
+secrets:
+  bootstrap_secret:
+    file: ./secrets/bootstrap-secret.txt
+  signing_key:
+    file: ../testdata/sample-config/dev-signing-key.pem
+
+volumes:
+  serverA_data:
+  serverB_data:
+  analysisA_data:

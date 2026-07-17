@@ -24,6 +24,8 @@ Authorization: Bearer {token}
 
 For the MVP, tokens should be signed JWT-like tokens.
 
+In Go, DatoriumDB uses [`lestrrat-go/jwx`](https://github.com/lestrrat-go/jwx) for JOSE work: JWT issuance and validation, JWK handling for `__auth.json`, and later JWE if encrypted JSON storage uses JOSE envelopes. Prefer a current major line such as `github.com/lestrrat-go/jwx/v3` or `v4`.
+
 Every DatoriumDB server should validate tokens locally using trusted public key material from establishment config. A server should not need to call the establishment server or an auth server for every request.
 
 ## Authority Source
@@ -36,9 +38,11 @@ Later versions may delegate token issuance and identity management to an externa
 
 ## Config Storage
 
-Auth-related public configuration should be stored in `/db/.config`.
+Auth-related public configuration is stored in `/db/.config/__auth.json`.
 
-The exact file layout is still to be finalized, but the config should support:
+That filename matches the other database-wide config files under `/db/.config` (`__general.json`, `__servers.json`, `__shard-map.json`). The establishment server reads it and includes the public auth material in the combined establishment response.
+
+`__auth.json` should support:
 
 - issuer name
 - token audience
@@ -47,7 +51,32 @@ The exact file layout is still to be finalized, but the config should support:
 - token lifetime defaults
 - machine bootstrap policy
 
-Private signing keys and bootstrap secrets should not be stored in Git-tracked config files unless they are explicitly test-only values.
+Conceptually:
+
+```json
+{
+  "auth": {
+    "issuer": "https://db.mydomain.com",
+    "audience": "datoriumdb",
+    "tokenLifetimeSeconds": {
+      "client": 3600,
+      "machine": 3600
+    },
+    "keys": [
+      {
+        "kid": "2026-07-primary",
+        "alg": "EdDSA",
+        "status": "active",
+        "publicKey": "..."
+      }
+    ]
+  }
+}
+```
+
+The exact key encoding and claim defaults can still be refined. The filename and file role are fixed: public trust material lives in `__auth.json`.
+
+Private signing keys and bootstrap secrets should not be stored in `__auth.json` or other Git-tracked config files unless they are explicitly test-only values.
 
 ## Smart-Client Flow
 
@@ -66,28 +95,63 @@ Each DatoriumDB server starts with:
 1. its own server name
 2. the establishment server base URL
 
-The server also needs an environment-provided bootstrap credential.
-
-For example:
+The server also needs an environment-provided bootstrap credential:
 
 ```text
 DATORIUMDB_MACHINE_BOOTSTRAP_SECRET=...
 ```
 
-The exact environment variable name is not final, but the purpose is important: the server needs some out-of-band secret so it can authenticate itself before it has fetched establishment config.
+That name is the MVP bootstrap credential. It is a shared cluster secret present in the environment of every server, including the establishment server. The establishment server validates it when issuing machine tokens. The bootstrap secret is never stored in `__auth.json` or other Git-tracked config. Per-server bootstrap secrets can be added later if needed.
 
-Startup flow:
+### Machine Token Endpoint
+
+Non-establishment servers obtain and renew machine tokens from the establishment server:
+
+```text
+POST /datoriumdb/v1/auth/machine-token
+Content-Type: application/json
+```
+
+Request body:
+
+```json
+{
+  "serverName": "serverB",
+  "bootstrapSecret": "..."
+}
+```
+
+Alternatively, a not-yet-expired machine token may be sent as `Authorization: Bearer {token}` instead of including `bootstrapSecret`, so servers can renew without reusing the bootstrap secret on every refresh.
+
+On success:
+
+```text
+{
+  ok: true,
+  token: "...",
+  expiresIn: 3600
+}
+```
+
+Only the establishment server and operator workstations hold `DATORIUMDB_SIGNING_KEY_FILE`. Worker servers validate tokens with public keys from `__auth.json` and never hold the private signing key.
+
+### Establishment Self-Start
+
+The establishment server reads `/db/.config` locally. It does not call HTTP `/establish` against itself.
+
+### Startup Flow
 
 1. The server starts with its own server name and the establishment server base URL.
-2. The server reads its bootstrap credential from the environment.
-3. The server uses the bootstrap credential to obtain or prove a machine identity.
-4. The server calls `GET /datoriumdb/v1/establish`.
+2. The establishment server loads local `/db/.config` and begins serving. Other servers read `DATORIUMDB_MACHINE_BOOTSTRAP_SECRET`.
+3. A non-establishment server calls `POST /datoriumdb/v1/auth/machine-token` with its server name and bootstrap secret.
+4. The server calls `GET /datoriumdb/v1/establish` with the machine bearer token.
 5. The server receives an `ok: true` envelope containing the combined establishment document.
-6. The server updates its local `/db/.config` cache from the establishment response.
+6. The server updates its local `/db/.config` cache from the establishment response and creates any missing collection directories.
 7. The server learns its roles from `general.establishmentServer` and `shardMap`.
-8. The server begins accepting only the requests allowed by its roles.
+8. The server refreshes its machine token on a timer before expiry using the machine-token endpoint.
+9. The server begins accepting only the requests allowed by its roles.
 
-If the server cannot authenticate and does not have an acceptable local cached config, it should shut back down.
+If the server cannot authenticate and does not have an acceptable local cached config, it should shut back down. Cached config is acceptable only when all required files are present; the server must still attempt an immediate background re-fetch and shut down if repeated refresh attempts fail.
 
 ## Server-To-Server Flow
 
@@ -105,17 +169,27 @@ Each receiving server validates the caller's token locally and verifies that the
 
 ## Token Claims
 
-The exact claim names are not final, but tokens should carry enough information to validate:
+MVP tokens use these claims:
 
-- issuer
-- audience
-- subject
-- expiration
-- token kind, such as client or machine
-- database identity
-- allowed operations or role scope
+| Claim | Required | Meaning |
+| --- | --- | --- |
+| `iss` | yes | issuer from `__auth.json` |
+| `aud` | yes | audience from `__auth.json` |
+| `sub` | yes | subject identity string |
+| `iat` | yes | issued-at time |
+| `exp` | yes | expiration time |
+| `datoriumdb.kind` | yes | `client` or `machine` |
+| `datoriumdb.serverName` | machine only | server name matching `__servers.json` |
 
-Machine tokens should identify the server name they represent.
+The JWT header should include `kid` matching an active or retired public key in `__auth.json`.
+
+MVP authorization is authentication only:
+
+- any valid client or machine token with correct `iss`, `aud`, and `exp` may call smart-client endpoints such as `/command` and `/establish`
+- server-to-server `/sys` endpoints require `datoriumdb.kind` = `machine`
+- the authenticated `datoriumdb.serverName` must match the `serverName` whose work is requested, fetched, applied, or deleted
+
+Stable auth error codes include `unauthenticated`, `invalidToken`, `tokenExpired`, and `machineIdentityMismatch`.
 
 Client tokens may eventually include collection-level or operation-level authorization, but partial schema visibility by authorization scope is not part of the MVP.
 
@@ -125,7 +199,28 @@ The config should allow more than one public signing key to be trusted at the sa
 
 This allows a new key to be introduced before the old key is retired.
 
-The command-line config tool should manage key metadata and increment `general.version` when auth config changes affect the combined establishment response.
+`datoriumctl` manages `__auth.json`, including public key metadata, and increments `general.version` when auth config changes affect the combined establishment response. See [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
+
+## Token Lifetimes
+
+MVP defaults in `__auth.json` are:
+
+- client tokens: `3600` seconds (1 hour)
+- machine tokens: `3600` seconds (1 hour)
+
+These are short-lived access tokens, not long-lived credentials. Machines should refresh their tokens on a timer before expiry after they have establishment config. The defaults can be changed later through `datoriumctl auth set` without changing the auth model.
+
+## Token Issuance
+
+For the MVP, `datoriumctl` can issue client and machine tokens. This is an operator bootstrap and demo path, not a full identity or user-management system.
+
+Token signing uses a private key kept outside `/db/.config`, typically provided by:
+
+```text
+DATORIUMDB_SIGNING_KEY_FILE=/path/to/private-key.pem
+```
+
+Only public key material belongs in `__auth.json`. Later versions may let an external OIDC provider issue client tokens while `datoriumctl` remains available as an operator escape hatch.
 
 ## External Auth Later
 
@@ -145,10 +240,14 @@ The MVP should support:
 
 - bearer-token authentication
 - local token validation by every DatoriumDB server
-- file-backed establishment auth metadata
-- server bootstrap through an environment-provided secret
+- file-backed establishment auth metadata in `__auth.json`
+- server bootstrap through `DATORIUMDB_MACHINE_BOOTSTRAP_SECRET`
+- runtime machine token issuance and renewal through `POST /datoriumdb/v1/auth/machine-token`
 - machine tokens for server-to-server calls
 - client tokens for smart-client calls
+- operator token issuance through `datoriumctl`
+- default client and machine token lifetimes of `3600` seconds
+- authentication-only authorization, plus machine-identity matching on `/sys` APIs
 
 The MVP does not need:
 
@@ -157,11 +256,3 @@ The MVP does not need:
 - partial schema visibility by authorization scope
 - per-document authorization rules
 - long-lived tokens
-
-## Open Questions
-
-- What is the exact file name for auth metadata under `/db/.config`?
-- What is the exact environment variable name for the machine bootstrap credential?
-- Should the MVP command-line tool issue client tokens directly?
-- What JWT library should be used in Go?
-- What token lifetimes should be used for client and machine tokens?

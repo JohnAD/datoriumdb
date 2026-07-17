@@ -1,0 +1,13 @@
+{
+  "collection": "Movies",
+  "command": "read",
+  "id": "fixedid002",
+  "ok": true,
+  "sot": {
+    "!": "fixedid002",
+    "#": "<ID:1>",
+    "$": "Movies:0",
+    "releaseYear": 2016,
+    "title": "Arrival"
+  }
+}

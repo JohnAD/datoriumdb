@@ -1,0 +1,10 @@
+{
+  "general": {
+    "name": "DatoriumDB Compose Proxy Read",
+    "establishmentServer": "serverA",
+    "version": 1,
+    "readMemberCheckinSeconds": 5,
+    "cacheUpdateCheckinSeconds": 30,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
+}

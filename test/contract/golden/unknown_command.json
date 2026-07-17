@@ -1,0 +1,10 @@
+{
+  "command": "frobnicate",
+  "errors": [
+    {
+      "code": "unknownCommand",
+      "message": "unsupported command"
+    }
+  ],
+  "ok": false
+}

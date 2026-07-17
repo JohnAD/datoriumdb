@@ -1,0 +1,35 @@
+# Single-node DatoriumDB topology: one server acting as its own
+# establishment server, SHARD_SOT_MEMBER, and SHARD_READ_MEMBER for the
+# whole 00-FF keyspace (tech-docs/AUTHENTICATION.md's "Establishment
+# Self-Start", tech-docs/SHARDING.md).
+#
+# Quick start (from the repository root):
+#   docker compose -f deploy/docker-compose.single-node.yml up --build
+#   curl http://127.0.0.1:8080/datoriumdb/v1/health
+#
+# Config source: test/compose/fixtures/single-node/serverA/.config
+
+services:
+  serverA:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: datoriumdb:local
+    command: ["serverA", "http://serverA:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_SIGNING_KEY_FILE: /secrets/dev-signing-key.pem
+    volumes:
+      - serverA_data:/db
+      - ../test/compose/fixtures/single-node/serverA/.config:/db/.config
+      - ../testdata/sample-config/dev-signing-key.pem:/secrets/dev-signing-key.pem:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  serverA_data:

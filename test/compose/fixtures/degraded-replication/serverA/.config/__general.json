@@ -1,0 +1,10 @@
+{
+  "general": {
+    "name": "DatoriumDB Compose Degraded Replication",
+    "establishmentServer": "serverA",
+    "version": 1,
+    "readMemberCheckinSeconds": 3,
+    "cacheUpdateCheckinSeconds": 15,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
+}

@@ -1,0 +1,102 @@
+# Five-shard DatoriumDB topology: five servers, each the SOT (and sole
+# read member) for one fifth of the 00-FF keyspace. server1 is also the
+# establishment server. server2..server5 bootstrap against server1
+# (tech-docs/ESTABLISHMENT-CONFIG.md's "Server Startup").
+#
+# Quick start (from the repository root):
+#   docker compose -f deploy/docker-compose.five-shard.yml up --build
+#   curl http://127.0.0.1:8081/datoriumdb/v1/health   # server1 (establishment)
+#
+# Config source: test/compose/fixtures/five-shard/server1/.config
+# Shard ranges: 00-33 server1, 34-66 server2, 67-99 server3, 9A-CC server4,
+# CD-FF server5.
+
+x-bootstrap-server: &bootstrap-server
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: datoriumdb:local
+  environment:
+    DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+  secrets:
+    - bootstrap_secret
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/datoriumdb/v1/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 10s
+
+services:
+  server1:
+    <<: *bootstrap-server
+    command: ["server1", "http://server1:8080", "--listen", "0.0.0.0:8080"]
+    environment:
+      DATORIUMDB_MACHINE_BOOTSTRAP_SECRET_FILE: /run/secrets/bootstrap_secret
+      DATORIUMDB_SIGNING_KEY_FILE: /run/secrets/signing_key
+    secrets:
+      - bootstrap_secret
+      - signing_key
+    volumes:
+      - server1_data:/db
+      - ../test/compose/fixtures/five-shard/server1/.config:/db/.config
+    ports:
+      - "8081:8080"
+    depends_on: []
+
+  server2:
+    <<: *bootstrap-server
+    command: ["server2", "http://server1:8080", "--listen", "0.0.0.0:8080"]
+    volumes:
+      - server2_data:/db
+    ports:
+      - "8082:8080"
+    depends_on:
+      server1:
+        condition: service_healthy
+
+  server3:
+    <<: *bootstrap-server
+    command: ["server3", "http://server1:8080", "--listen", "0.0.0.0:8080"]
+    volumes:
+      - server3_data:/db
+    ports:
+      - "8083:8080"
+    depends_on:
+      server1:
+        condition: service_healthy
+
+  server4:
+    <<: *bootstrap-server
+    command: ["server4", "http://server1:8080", "--listen", "0.0.0.0:8080"]
+    volumes:
+      - server4_data:/db
+    ports:
+      - "8084:8080"
+    depends_on:
+      server1:
+        condition: service_healthy
+
+  server5:
+    <<: *bootstrap-server
+    command: ["server5", "http://server1:8080", "--listen", "0.0.0.0:8080"]
+    volumes:
+      - server5_data:/db
+    ports:
+      - "8085:8080"
+    depends_on:
+      server1:
+        condition: service_healthy
+
+secrets:
+  bootstrap_secret:
+    file: ./secrets/bootstrap-secret.txt
+  signing_key:
+    file: ../testdata/sample-config/dev-signing-key.pem
+
+volumes:
+  server1_data:
+  server2_data:
+  server3_data:
+  server4_data:
+  server5_data:

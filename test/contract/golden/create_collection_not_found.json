@@ -1,0 +1,11 @@
+{
+  "collection": "NoSuchCollection",
+  "command": "create",
+  "errors": [
+    {
+      "code": "collectionNotFound",
+      "message": "collection does not exist"
+    }
+  ],
+  "ok": false
+}

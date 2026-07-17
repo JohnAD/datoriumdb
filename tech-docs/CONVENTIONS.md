@@ -34,9 +34,15 @@ Document IDs cannot contain punctuation other than underscore, period, and dash.
 
 When the database creates document IDs internally, it uses simple ULIDs. See the [ULID specification](https://github.com/ulid/spec).
 
-The first period has special meaning for CRC16 sharding. If the ID has no period, the whole ID is used for sharding. If the ID has a period, only the part before the first period is used for sharding.
+The first period has special meaning for CRC32 sharding. If the ID has no period, the whole ID is used for sharding. If the ID has a period, only the part before the first period is used for sharding.
 
 Periods in the first six positions are ignored for sharding prefix detection.
+
+The shard slot is:
+
+```text
+shard = crc32(prefixBytes) & 0xFF
+```
 
 ## Document References
 
@@ -52,4 +58,4 @@ Cached document summary references should use this string format:
 @@__{collection}__{id}
 ```
 
-In document content, these references are stored as strings. The schema mechanism for declaring direct references and cached summary references is still to be determined.
+In document content, these references are stored as strings. Schema fields declare them with OJSON string formats `DatoriumDirectRef` and `DatoriumCachedRef`. See [SCHEMAS.md](SCHEMAS.md).

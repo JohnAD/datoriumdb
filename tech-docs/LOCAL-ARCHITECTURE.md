@@ -36,13 +36,22 @@ The default route prefix for DatoriumDB servers is `/datoriumdb/v1`. After authe
 
 The server accepts DatoriumDB access-language commands and returns command result envelopes.
 
+The MVP HTTP transport is:
+
+```text
+POST /datoriumdb/v1/command
+Content-Type: text/plain; charset=utf-8
+```
+
+The request body is one access-language command. The response is a JSON result envelope. See [ACCESS-LANGUAGE.md](ACCESS-LANGUAGE.md).
+
 The command layer should remain separate from the transport layer. This keeps the access language reusable if later versions add other transports.
 
 Commands should follow the sharding path even when every shard maps to the same machine:
 
 1. Compute the document or search shard.
 2. Resolve the target server from establishment configuration.
-3. Accept the command locally or refuse/redirect it to the correct server.
+3. Accept the command locally or refuse it with a `wrongMachine` error that includes routing hints.
 
 ## Scheduler
 
@@ -113,14 +122,14 @@ This architecture gives DatoriumDB:
 
 ## MVP Limits
 
-The MVP includes sharding, but avoids advanced distributed operations.
+The MVP includes sharding and bearer-token authentication, but avoids advanced distributed operations.
 
 It does not provide:
 
-- authentication or authorization
+- collection-level or per-document authorization rules
 - encryption
 - automatic shard rebalancing
 - automatic SOT failover election
 - dynamic cluster membership
 
-Those concerns belong to later versions.
+Those concerns belong to later versions. Authentication details are in [AUTHENTICATION.md](AUTHENTICATION.md).

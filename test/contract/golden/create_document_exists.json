@@ -1,0 +1,12 @@
+{
+  "collection": "Movies",
+  "command": "create",
+  "errors": [
+    {
+      "code": "documentExists",
+      "message": "document already exists"
+    }
+  ],
+  "id": "fixedid001",
+  "ok": false
+}

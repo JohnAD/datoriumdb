@@ -1,0 +1,10 @@
+{
+  "general": {
+    "name": "DatoriumDB Compose Five Shard",
+    "establishmentServer": "server1",
+    "version": 1,
+    "readMemberCheckinSeconds": 10,
+    "cacheUpdateCheckinSeconds": 60,
+    "readMemberFailedCheckinsBeforeStale": 3
+  }
+}

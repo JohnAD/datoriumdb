@@ -1,0 +1,12 @@
+{
+  "collection": "Movies",
+  "command": "read",
+  "errors": [
+    {
+      "code": "documentNotFound",
+      "message": "document not found"
+    }
+  ],
+  "id": "doesNotExist001",
+  "ok": false
+}

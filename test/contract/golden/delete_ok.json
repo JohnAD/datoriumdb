@@ -1,0 +1,8 @@
+{
+  "#": "<ID:1>",
+  "collection": "Movies",
+  "command": "delete",
+  "id": "fixedid005",
+  "ok": true,
+  "operationId": "<ID:2>"
+}

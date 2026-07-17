@@ -1,0 +1,15 @@
+{
+  "collection": "Movies",
+  "command": "patch",
+  "errors": [
+    {
+      "actual": "<ID:1>",
+      "code": "versionMismatch",
+      "expected": "notTheRealVersion",
+      "message": "Document version does not match.",
+      "path": "/#"
+    }
+  ],
+  "id": "fixedid004",
+  "ok": false
+}

@@ -1,0 +1,11 @@
+{
+  "shardMap": {
+    "default": {
+      "00-FF": {
+        "SHARD_SOT_MEMBER": "serverA",
+        "SHARD_READ_MEMBER": ["serverB"],
+        "PROXY_READ_MEMBER": []
+      }
+    }
+  }
+}
