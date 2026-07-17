@@ -7,6 +7,13 @@ This is a document-oriented database server. Document-oriented databases are oft
 
 DatoriumDB works best with a "smart client" that can navigate sharding and distribution intelligently.
 
+## Install
+
+Linux and Docker install instructions are in [INSTALL.md](INSTALL.md).
+Published binaries are on the
+[GitHub Releases](https://github.com/JohnAD/datoriumdb/releases) page
+([latest](https://github.com/JohnAD/datoriumdb/releases/latest)).
+
 ## Features
 
 - **Separation of Truth** — A document can hold information that is (1) authoritative, (2) cached, or (3) untracked. Those roles are never mixed. Data is organized into **Collections**, each with a schema that enforces these roles across every document. If one collection owns an authoritative "Year" field for an object, no other collection may own that same "Year" authoritatively — though others may keep cached copies. Documents may also carry non-schema data that is untracked and visible only when that document is read.
