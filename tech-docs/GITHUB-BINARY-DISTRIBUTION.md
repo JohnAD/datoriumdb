@@ -9,9 +9,9 @@ DatoriumDB ships two separate binaries (see [COMMAND-LINE-TOOLS.md](COMMAND-LINE
 
 They must remain separate artifacts. Do not publish a single binary that switches roles by argument or subcommand.
 
-Container images are covered briefly at the end. The primary distribution path for operators who are not using Docker is **GitHub Releases** with attached archive assets.
+The distribution path is **GitHub Releases** with attached archive assets, triggered by pushing a version tag.
 
-## Recommended Approach
+## Approach
 
 Use this combination:
 
@@ -21,46 +21,103 @@ Use this combination:
 
 That keeps distribution inside the same repository that already runs CI (`.github/workflows/ci.yml`). No separate artifact server is required for MVP.
 
-An optional, widely used alternative is [GoReleaser](https://goreleaser.com/) driving the same GitHub Releases target. The steps below work with either a hand-written workflow or GoReleaser; the GitHub-side setup is the same.
+An optional alternative is [GoReleaser](https://goreleaser.com/) driving the same GitHub Releases target. The steps below work with either a hand-written workflow or GoReleaser; the GitHub-side setup is the same.
+
+Publishing container images to GitHub Packages / GHCR is out of scope for now. The local `Dockerfile` remains for development and Compose; operators download binaries from Releases.
 
 ## One-Time Repository Setup
 
-### 1. Confirm the default branch and permissions
+### 1. Confirm Actions permissions
 
 In the GitHub repository:
 
 1. Open **Settings → Actions → General**
 2. Under **Workflow permissions**, choose **Read and write permissions**
-3. Enable **Allow GitHub Actions to create and approve pull requests** only if you also want automation that opens PRs; it is not required for binary publishing
+3. Leave **Allow GitHub Actions to create and approve pull requests** disabled — not needed for binary publishing, and this project does not use automation that opens PRs
 
 The release workflow needs `contents: write` so it can create a Release and upload assets. Keep that permission scoped to the release workflow, not to every CI job.
 
-### 2. Decide who may cut releases
+### 2. Tag-push releases
 
-Pick one policy and stick to it:
+There is no separate GitHub toggle labeled “tag-push releases.” You enable this model by (A) adding a release workflow that runs on version tags, and (B) protecting `main` so you only tag commits that already passed CI. There is no manual **Actions → Run workflow** release path.
 
-- **Tag-push releases** (recommended): anyone with permission to push tags to the default remote can cut a release. The workflow runs on `push` of tags matching `v*`.
-- **Manual `workflow_dispatch`**: maintainers run the workflow from the Actions UI and pass a version input. Useful if tags are protected or signed elsewhere.
+#### A. Confirm the release workflow is on the default branch
 
-Protect the default branch with required CI checks so only green commits are tagged.
+The workflow file already lives in the repo at
+`.github/workflows/release.yml`.
 
-### 3. Optional: protect version tags
+1. Commit and push it on `main` if it is not already there
+2. Open the repo’s **Actions** tab and confirm a workflow named **Release**
+   appears (it will show no runs until the first `v*` tag is pushed)
 
-Under **Settings → Rules → Rulesets** (or classic branch/tag protection):
+Until that file is on the default branch, pushing a tag will not publish
+binaries.
 
-- Restrict who can create tags matching `v*`
-- Require that the tagged commit has passed CI
+#### B. Protect `main` with required CI checks
 
-This prevents accidental or unauthorized publishes.
+Do this so maintainers only tag commits that CI has already validated.
 
-### 4. Optional: GitHub Packages (container images)
+1. Open the repository on GitHub
+2. Click **Settings**
+3. In the left sidebar, click **Rules** → **Rulesets**
+4. Click **New ruleset** → **New branch ruleset**
+5. Set **Ruleset name** to something like `protect-main`
+6. Set **Enforcement status** to **Active**
+7. Under **Target branches**, click **Add target** → **Include default branch**
+   (or **Include by pattern** and enter `main`)
+8. Under **Rules**, enable:
+   - **Restrict deletions**
+   - **Block force pushes**
+   - **Require a pull request before merging** — leave this **off** if you
+     push straight to `main` as maintainers and do not use PRs (this project’s
+     policy). If you later adopt internal PRs among maintainers, turn it on then.
+   - **Require status checks to pass** — turn this **on**, then:
+     1. Enable **Require branches to be up to date before merging** if you
+        want the tip of `main` itself always green before further pushes land
+     2. Click **Add checks**
+     3. Add the CI job names from `.github/workflows/ci.yml` that must be
+        green before you treat a commit as releasable. At minimum add the
+        jobs that always run on `main`, for example:
+        - `format / vet / deps`
+        - `unit tests (-race)`
+        - `contract + integration tests`
+        - `crash tests (SIGKILL, Linux)`
+        - `docker build`
+     4. Exact names must match the `name:` fields in `ci.yml` (GitHub’s
+        picker lists them after those jobs have run at least once on the
+        branch)
+9. Click **Create** (or **Save changes**)
 
-If you also want to publish the multi-stage `Dockerfile` image:
+**Note:** If maintainers push commits directly to `main` (no pull requests),
+GitHub’s “require status checks” rule mainly applies when something is
+*merged* into the branch. It will not always block a direct `git push` to
+`main`. In that workflow, the practical gate is still: open **Actions**,
+confirm the latest run on `main` is green, then create and push the tag.
+The ruleset is still worth having for **no force-push** and **no branch
+deletion**.
 
-1. The default `GITHUB_TOKEN` can push to **GitHub Container Registry** (`ghcr.io`) when the workflow has `packages: write`
-2. Package visibility defaults to private for private repos; set the package to public under **Packages** if anonymous pulls are desired
+After CI is green on `main`, create and push an annotated tag (see
+[Cutting A Release](#cutting-a-release-operator-steps)). That tag push is
+what starts the **Release** workflow.
 
-Binary archives on Releases and images on GHCR are complementary; operators can use either.
+### 3. Restrict who can create tags and open PRs
+
+This repository is not open to public contribution via pull requests. Keep contribution and tag creation limited to trusted maintainers.
+
+**Tags** — under **Settings → Rules → Rulesets** (or classic tag protection):
+
+- Restrict who can create tags matching `v*` to maintainers (or a named team)
+- Optionally require that the tagged commit has passed CI
+
+Only people allowed to push those tags can cut a release.
+
+**Pull requests** — under **Settings → General → Features** (and related access settings):
+
+- Do not enable or solicit public pull requests
+- Keep the contributor set to repository collaborators / the owning organization only
+- If the repository is public for download visibility, still disable or ignore unsolicited PRs; do not merge changes from unknown contributors
+
+Code changes land through maintainers with push access (or an internal process), not through public PR review.
 
 ## Versioning And Tags
 
@@ -112,78 +169,27 @@ CGO_ENABLED=0
 
 `CGO_ENABLED=0` matches the production `Dockerfile` and produces static binaries that do not depend on a local libc on the target host.
 
-## Example Release Workflow
+## Release Workflow
 
-Create `.github/workflows/release.yml` (this file is not required to exist yet; add it when you are ready to publish). The sketch below is enough for GitHub-hosted binaries without GoReleaser:
+The canonical workflow is `.github/workflows/release.yml`. On each `v*` tag
+push it:
 
-```yaml
-name: Release
+1. Cross-compiles `datoriumdb` and `datoriumctl` for linux/darwin × amd64/arm64
+2. Builds per-platform `.tar.gz` archives
+3. Writes `checksums.txt` (SHA-256)
+4. Creates a GitHub Release and attaches every archive plus the checksums file
 
-on:
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binaries
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-          VERSION: ${{ github.ref_name }}
-        run: |
-          mkdir -p dist
-          ldflags="-s -w -X main.version=${VERSION}"
-          go build -trimpath -ldflags="$ldflags" -o "dist/datoriumdb" ./cmd/datoriumdb
-          go build -trimpath -ldflags="$ldflags" -o "dist/datoriumctl" ./cmd/datoriumctl
-          tar -C dist -czf "datoriumdb_${VERSION}_${GOOS}_${GOARCH}.tar.gz" datoriumdb
-          tar -C dist -czf "datoriumctl_${VERSION}_${GOOS}_${GOARCH}.tar.gz" datoriumctl
-
-      - name: Upload archives
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            datoriumdb_*.tar.gz
-            datoriumctl_*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-Add a final job (or a follow-up step after the matrix) that concatenates SHA-256 checksums into `checksums.txt` and uploads that file to the same Release. Matrix jobs uploading the same Release work with `softprops/action-gh-release` as long as each job attaches only its own archives.
+Prefer editing that file in place over maintaining a second copy here.
 
 ### GoReleaser alternative
 
-If you prefer GoReleaser:
+If you later prefer GoReleaser instead of the hand-written workflow:
 
-1. Add a `.goreleaser.yaml` that builds `cmd/datoriumdb` and `cmd/datoriumctl` for the matrix above
-2. Add a workflow that runs `goreleaser release --clean` on `v*` tags
-3. Grant the job `contents: write` (and `packages: write` if also pushing images)
+1. Add a `.goreleaser.yaml` that builds `cmd/datoriumdb` and `cmd/datoriumctl` for the same OS/arch matrix
+2. Replace `.github/workflows/release.yml` with a workflow that runs `goreleaser release --clean` on `v*` tags
+3. Keep job permission `contents: write`
 
-GoReleaser will create the GitHub Release, attach archives, and generate checksums. Keep the binary names and archive layout consistent with the table above so install docs stay stable.
+Keep the binary names and archive layout consistent with the table above so install docs stay stable.
 
 ## Cutting A Release (Operator Steps)
 
@@ -238,39 +244,6 @@ The GitHub CLI shortcut:
 gh release download v0.1.0 --repo <owner>/datoriumdb --pattern 'datorium*_linux_amd64.tar.gz'
 ```
 
-## Container Images On GitHub (Optional)
-
-The repository already has a production-like multi-stage `Dockerfile` that builds both binaries. To host images beside Releases:
-
-1. Add a workflow job that builds and pushes to `ghcr.io/<owner>/datoriumdb:<version>` and `:latest` (only for non-pre-release tags)
-2. Set job permissions:
-
-   ```yaml
-   permissions:
-     contents: read
-     packages: write
-   ```
-
-3. Authenticate with:
-
-   ```yaml
-   - uses: docker/login-action@v3
-     with:
-       registry: ghcr.io
-       username: ${{ github.actor }}
-       password: ${{ secrets.GITHUB_TOKEN }}
-   ```
-
-4. Tag images with the same git version used for binary Releases so binary and image lines stay aligned
-
-Pull example:
-
-```text
-docker pull ghcr.io/<owner>/datoriumdb:v0.1.0
-```
-
-Compose topologies under `deploy/` can keep building from the local `Dockerfile` for development, and pin `image: ghcr.io/<owner>/datoriumdb:v…` for published environments.
-
 ## Relationship To Existing CI
 
 `.github/workflows/ci.yml` validates code quality, tests, coverage, crash suites, Compose E2E, and a `docker build` smoke check. It does **not** publish binaries.
@@ -279,10 +252,10 @@ Keep those concerns separate:
 
 | Workflow | Trigger | Publishes artifacts? |
 | --- | --- | --- |
-| `ci.yml` | PR, `main`, nightly, manual | No (test artifacts only) |
-| `release.yml` (to add) | `v*` tags | Yes — GitHub Release assets (and optionally GHCR) |
+| `ci.yml` | `main`, nightly, manual (and any internal CI triggers you keep) | No (test artifacts only) |
+| `release.yml` | `v*` tags | Yes — GitHub Release assets |
 
-Do not attach release binaries from the PR CI workflow. Always publish from an immutable tag.
+Do not attach release binaries from the CI workflow. Always publish from an immutable tag.
 
 ## Security Notes
 
@@ -293,19 +266,20 @@ Do not attach release binaries from the PR CI workflow. Always publish from an i
 
 ## Checklist Before The First Public Binary Release
 
-- [ ] Release workflow added and tested with a pre-release tag (for example `v0.0.0-test.1`)
+- [ ] Release workflow on `main` tested with a pre-release tag (for example `v0.0.0-test.1`)
 - [ ] Archives contain only the intended binary (no config, keys, or `/db` data)
 - [ ] `checksums.txt` is attached
 - [ ] Release notes describe upgrade / config expectations for that version
 - [ ] README links to the latest Release download page
-- [ ] (Optional) GHCR image published with the same version tag
+- [ ] Tag creation restricted to maintainers; public PRs not accepted
 - [ ] Pre-release test tag deleted or clearly marked so it is not mistaken for production
 
 ## Out Of Scope For This Document
 
+- Publishing container images to GitHub Packages / GHCR (may be added later)
 - Linux distribution packages (deb/rpm/Homebrew taps)
 - Automatic update clients inside `datoriumdb`
-- Publishing to Docker Hub or third-party registries other than GHCR
+- Publishing to Docker Hub or other third-party registries
 - Code signing for macOS notarization or Windows Authenticode
 
 Those can be layered on top of the same GitHub Release version line later.

@@ -9,6 +9,9 @@ import (
 	"github.com/JohnAD/datoriumdb/internal/ctl"
 )
 
+// Set at link time by release builds: -X main.version=v0.1.0
+var version = "dev"
+
 func main() {
 	os.Exit(ctl.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

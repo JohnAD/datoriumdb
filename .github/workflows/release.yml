@@ -1,0 +1,92 @@
+# Tag-push binary release for DatoriumDB.
+# See tech-docs/GITHUB-BINARY-DISTRIBUTION.md.
+#
+# Trigger: push an annotated tag matching v* (for example v0.1.0).
+# Publishes datoriumdb / datoriumctl archives plus checksums.txt to a
+# GitHub Release for that tag.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archives
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          ldflags="-s -w -X main.version=${VERSION}"
+          go build -trimpath -ldflags="$ldflags" -o dist/datoriumdb ./cmd/datoriumdb
+          go build -trimpath -ldflags="$ldflags" -o dist/datoriumctl ./cmd/datoriumctl
+          tar -C dist -czf "datoriumdb_${VERSION}_${GOOS}_${GOARCH}.tar.gz" datoriumdb
+          tar -C dist -czf "datoriumctl_${VERSION}_${GOOS}_${GOARCH}.tar.gz" datoriumctl
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: archives-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            datoriumdb_*.tar.gz
+            datoriumctl_*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: archives-*
+          merge-multiple: true
+
+      - name: Generate checksums.txt
+        working-directory: release-assets
+        run: |
+          sha256sum datoriumdb_*.tar.gz datoriumctl_*.tar.gz | sort > checksums.txt
+          ls -la
+          cat checksums.txt
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

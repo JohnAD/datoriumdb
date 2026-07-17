@@ -23,6 +23,9 @@ import (
 	"github.com/JohnAD/datoriumdb/internal/server"
 )
 
+// Set at link time by release builds: -X main.version=v0.1.0
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Fprintf(os.Stderr, "usage: datoriumdb <serverName> <establishmentBaseURL> [--listen addr] [--config-dir path] [--data-dir path]\n")
