@@ -125,3 +125,62 @@ func TestReadWithoutCacheSummariesFlagOmitsField(t *testing.T) {
 		t.Fatalf("expected cacheSummaries to be omitted when not requested")
 	}
 }
+
+const engineNestedReviewsSchema = `{
+  "kind": "object",
+  "children": [
+    {"name": "text", "kind": "string"},
+    {"name": "meta", "kind": "object", "children": [
+      {"name": "movieRef", "kind": "string", "format": "DatoriumCachedRef",
+        "custom": {"collections": ["Movies"], "summary": ["title"]}}
+    ]}
+  ]
+}`
+
+func TestReadCacheSummariesFindsNestedCachedRefs(t *testing.T) {
+	eng := testEngine(t)
+	if err := os.WriteFile(filepath.Join(eng.ConfigDir, "Reviews.schema.json"), []byte(engineNestedReviewsSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eng.ConfigDir, "Reviews.schema.0.json"), []byte(engineNestedReviewsSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.WriteWorkItem(eng.DataDir, eng.ServerName, cache.WorkItem{
+		SourceCollection: "Movies", SourceDocumentID: "movieNested", Command: "create",
+		AfterVersion: "v1", Payload: map[string]any{"!": "movieNested", "#": "v1", "title": "Nested"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.EnsureStub(eng.DataDir, "Movies", "movieNested"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := cache.ReadWorkItem(eng.DataDir, "Movies", eng.ServerName, "movieNested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Apply(eng.DataDir, *item); err != nil {
+		t.Fatal(err)
+	}
+
+	created := eng.Execute(`create Reviews null {$: Reviews:0, text: "x", meta: {movieRef: "@@__Movies__movieNested"}}`)
+	if created["ok"] != true {
+		t.Fatalf("create failed: %#v", created)
+	}
+	id, _ := created["id"].(string)
+	read := eng.Execute(`read Reviews ` + id + ` {cacheSummaries: true}`)
+	if read["ok"] != true {
+		t.Fatalf("read failed: %#v", read)
+	}
+	summaries, _ := read["cacheSummaries"].(map[string]any)
+	movies, _ := summaries["Movies"].(map[string]any)
+	movie, ok := movies["movieNested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested movieRef to produce a cache summary, got %#v", summaries)
+	}
+	if movie["title"] != "Nested" {
+		t.Fatalf("expected nested ref title, got %#v", movie)
+	}
+}

@@ -63,6 +63,108 @@ func TestFindRefFieldsSkipsUnresolvableValues(t *testing.T) {
 	}
 }
 
+const userSchemaWithListArray = `{
+  "kind": "object",
+  "children": [
+    {"name": "displayName", "kind": "string"},
+    {"name": "todoLists", "kind": "array",
+      "items": {"kind": "string", "format": "DatoriumCachedRef",
+        "custom": {"collections": ["TodoLists"], "summary": ["title"]}}}
+  ]
+}`
+
+func TestFindRefFieldsArrayOfCachedRefs(t *testing.T) {
+	doc := map[string]any{
+		"displayName": "Grace",
+		"todoLists": []any{
+			EncodeRef("TodoLists", "listA"),
+			EncodeRef("TodoLists", "listB"),
+			"not-a-ref",
+		},
+	}
+	fields, err := FindRefFields(json.RawMessage(userSchemaWithListArray), doc)
+	if err != nil {
+		t.Fatalf("FindRefFields: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 array refs, got %+v", fields)
+	}
+	if fields[0].TargetID != "listA" || fields[1].TargetID != "listB" {
+		t.Fatalf("unexpected targets: %+v", fields)
+	}
+	if fields[0].FieldName != "todoLists" || len(fields[0].Summary) != 1 || fields[0].Summary[0] != "title" {
+		t.Fatalf("unexpected first field: %+v", fields[0])
+	}
+}
+
+const nestedProfileSchema = `{
+  "kind": "object",
+  "children": [
+    {"name": "displayName", "kind": "string"},
+    {"name": "profile", "kind": "object", "children": [
+      {"name": "lists", "kind": "array",
+        "items": {"kind": "string", "format": "DatoriumCachedRef",
+          "custom": {"collections": ["TodoLists"], "summary": ["title"]}}},
+      {"name": "primary", "kind": "string", "format": "DatoriumCachedRef",
+        "custom": {"collections": ["TodoLists"], "summary": ["title"]}}
+    ]},
+    {"name": "folders", "kind": "array", "items": {"kind": "object", "children": [
+      {"name": "name", "kind": "string"},
+      {"name": "ref", "kind": "string", "format": "DatoriumCachedRef",
+        "custom": {"collections": ["TodoLists"], "summary": ["title"]}}
+    ]}}
+  ]
+}`
+
+func TestFindRefFieldsNestedObjectsAndArrays(t *testing.T) {
+	doc := map[string]any{
+		"displayName": "Ada",
+		"profile": map[string]any{
+			"lists": []any{
+				EncodeRef("TodoLists", "nestedA"),
+				EncodeRef("TodoLists", "nestedB"),
+			},
+			"primary": EncodeRef("TodoLists", "primary1"),
+		},
+		"folders": []any{
+			map[string]any{
+				"name": "Work",
+				"ref":  EncodeRef("TodoLists", "folderWork"),
+			},
+			map[string]any{
+				"name": "Home",
+				"ref":  EncodeRef("TodoLists", "folderHome"),
+			},
+		},
+	}
+	fields, err := FindRefFields(json.RawMessage(nestedProfileSchema), doc)
+	if err != nil {
+		t.Fatalf("FindRefFields: %v", err)
+	}
+	got := map[string]string{}
+	for _, f := range fields {
+		got[f.FieldName+"|"+f.TargetID] = f.TargetCollection
+		if len(f.Summary) != 1 || f.Summary[0] != "title" {
+			t.Fatalf("unexpected summary on %+v", f)
+		}
+	}
+	want := []string{
+		"profile/lists|nestedA",
+		"profile/lists|nestedB",
+		"profile/primary|primary1",
+		"folders/ref|folderWork",
+		"folders/ref|folderHome",
+	}
+	if len(fields) != len(want) {
+		t.Fatalf("expected %d refs, got %d (%+v)", len(want), len(fields), fields)
+	}
+	for _, key := range want {
+		if got[key] != "TodoLists" {
+			t.Fatalf("missing or wrong ref %q in %+v", key, fields)
+		}
+	}
+}
+
 func TestBuildSummary(t *testing.T) {
 	cached := map[string]any{
 		"!":      "id1",

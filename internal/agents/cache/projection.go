@@ -33,8 +33,10 @@ func EncodeRef(collection, id string) string {
 	return RefPrefix + collection + "__" + id
 }
 
-// RefField is one resolved DatoriumCachedRef field found directly on a
-// document (top-level fields only; see FindRefFields).
+// RefField is one resolved DatoriumCachedRef value found while walking a
+// document against its schema. FieldName is a slash-separated path relative
+// to the document root (for example "movieRef", "todoLists", or
+// "profile/lists").
 type RefField struct {
 	FieldName        string
 	TargetCollection string
@@ -42,16 +44,14 @@ type RefField struct {
 	Summary          []string
 }
 
-// FindRefFields scans doc's top-level schema fields for DatoriumCachedRef
-// fields with a resolvable stored value. Per SCHEMAS.md's "Cached Document
-// Summary References", the value itself carries {collection}/{id}, so no
+// FindRefFields walks doc against schemaRaw and returns every resolvable
+// DatoriumCachedRef string value. Per SCHEMAS.md's "Cached Document Summary
+// References", the stored value itself carries {collection}/{id}, so no
 // disambiguation against custom.collections is needed here (that list is
 // only a write-time validation constraint, per COMMAND-LINE-TOOLS.md).
 //
-// This narrow MVP only looks at top-level object fields, not fields nested
-// inside child objects or array items; nested cached-reference fields are
-// a documented gap (see AGENT-FOR-COLLECTION-UPGRADE / CACHE-UPDATES open
-// details).
+// The walk is recursive: nested objects, arrays of cached-ref strings, and
+// arrays of objects (and deeper nesting) are all searched.
 func FindRefFields(schemaRaw json.RawMessage, doc map[string]any) ([]RefField, error) {
 	schema, err := config.CompileSchemaBytes(schemaRaw)
 	if err != nil {
@@ -62,30 +62,91 @@ func FindRefFields(schemaRaw json.RawMessage, doc map[string]any) ([]RefField, e
 		return nil, nil
 	}
 	var out []RefField
-	for _, child := range root.Children() {
-		if child.Format() != "DatoriumCachedRef" {
-			continue
-		}
-		raw, ok := doc[child.Name()]
-		if !ok {
-			continue
-		}
-		s, isStr := raw.(string)
-		if !isStr {
-			continue
-		}
-		collection, id, ok := ParseRef(s)
-		if !ok {
-			continue
-		}
-		out = append(out, RefField{
-			FieldName:        child.Name(),
-			TargetCollection: collection,
-			TargetID:         id,
-			Summary:          stringItems(child.Custom().Get("summary")),
-		})
-	}
+	collectRefFields(root, doc, "", &out)
 	return out, nil
+}
+
+func collectRefFields(entry ojson.SchemaEntry, value any, path string, out *[]RefField) {
+	if !entry.Valid() || value == nil {
+		return
+	}
+
+	if entry.Format() == "DatoriumCachedRef" {
+		s, ok := value.(string)
+		if !ok {
+			return
+		}
+		name := path
+		if name == "" {
+			name = entry.Name()
+		}
+		if rf, ok := refFieldFrom(name, s, entry); ok {
+			*out = append(*out, rf)
+		}
+		return
+	}
+
+	switch entry.Kind() {
+	case ojson.KindObject:
+		m, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		for _, child := range entry.Children() {
+			raw, ok := m[child.Name()]
+			if !ok {
+				continue
+			}
+			collectRefFields(child, raw, joinFieldPath(path, child.Name()), out)
+		}
+	case ojson.KindArray:
+		items := entry.Items()
+		if !items.Valid() {
+			return
+		}
+		arr, ok := value.([]any)
+		if !ok {
+			return
+		}
+		arrayPath := path
+		if arrayPath == "" {
+			arrayPath = entry.Name()
+		}
+		for _, elem := range arr {
+			if items.Format() == "DatoriumCachedRef" {
+				// Array of ref strings: attribute each hit to the array field path.
+				collectRefFields(items, elem, arrayPath, out)
+				continue
+			}
+			// Array of objects (or deeper): keep the array path as the
+			// prefix and let object children append their names.
+			collectRefFields(items, elem, arrayPath, out)
+		}
+	}
+}
+
+func joinFieldPath(base, name string) string {
+	switch {
+	case base == "":
+		return name
+	case name == "":
+		return base
+	default:
+		return base + "/" + name
+	}
+}
+
+func refFieldFrom(fieldName, stored string, schemaEntry ojson.SchemaEntry) (RefField, bool) {
+	collection, id, ok := ParseRef(stored)
+	if !ok {
+		return RefField{}, false
+	}
+	return RefField{
+		FieldName:        fieldName,
+		TargetCollection: collection,
+		TargetID:         id,
+		Summary:          stringItems(schemaEntry.Custom().Get("summary")),
+	}, true
 }
 
 func stringItems(v ojson.JSONValue) []string {
