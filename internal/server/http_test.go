@@ -606,6 +606,17 @@ func TestGateWorkerBootstrapsWithoutLocalConfigAndRenews(t *testing.T) {
 	if _, ok := cfg.Schemas["Movies"]; !ok {
 		t.Fatalf("expected Movies schema to be cached: %#v", cfg.Schemas)
 	}
+	schemaOnDisk, err := os.ReadFile(filepath.Join(configDir, "Movies.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaText := string(schemaOnDisk)
+	if !strings.Contains(schemaText, "{\n  \"kind\": \"object\"") {
+		t.Fatalf("cached schema should be pretty-printed with kind first, got:\n%s", schemaText)
+	}
+	if strings.Index(schemaText, `"kind"`) > strings.Index(schemaText, `"children"`) {
+		t.Fatalf("cached schema must preserve field order (kind before children), got:\n%s", schemaText)
+	}
 	if _, err := os.Stat(filepath.Join(dataDir, "Movies")); err != nil {
 		t.Fatalf("expected Movies collection directory to be created: %v", err)
 	}

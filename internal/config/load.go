@@ -554,23 +554,23 @@ func combineErrors(errs []envelope.Error) error {
 }
 
 // EstablishDocument builds the combined establishment response body fields.
+// Schema and search definition bodies are embedded as json.RawMessage so
+// encoding/json does not reparse them into map[string]any (which would
+// destroy field order). Callers that write those bodies to disk should
+// pretty-print with PrettyJSONBytes (OJSON).
 func (c *Config) EstablishDocument() map[string]any {
 	schemas := map[string]any{}
 	for name, raw := range c.Schemas {
-		var schema any
-		_ = json.Unmarshal(raw, &schema)
 		schemas[name] = map[string]any{
 			"version": c.SchemaVersion(name),
-			"schema":  schema,
+			"schema":  json.RawMessage(raw),
 		}
 	}
 	searches := map[string]any{}
 	for collection, byName := range c.Searches {
 		inner := map[string]any{}
 		for name, raw := range byName {
-			var def any
-			_ = json.Unmarshal(raw, &def)
-			inner[name] = def
+			inner[name] = json.RawMessage(raw)
 		}
 		searches[collection] = inner
 	}

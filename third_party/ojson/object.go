@@ -52,6 +52,23 @@ func (v JSONValue) HasField(key string) bool {
 	return false
 }
 
+// ObjectFields returns a copy of this object's fields in document order.
+// Non-object receivers return nil. Void-valued fields are omitted so the
+// result matches HasField / Get visibility rules.
+func (v JSONValue) ObjectFields() []JSONKeyValue {
+	if !v.IsObject() {
+		return nil
+	}
+	out := make([]JSONKeyValue, 0, len(v.node.objectValue))
+	for _, field := range v.node.objectValue {
+		if field.Value.IsVoid() {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
 func (v JSONValue) Set(key string, value JSONValue) {
 	if !v.IsObject() {
 		return

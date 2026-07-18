@@ -14,6 +14,10 @@ func TestObjectGetSetRemoveAndOrder(t *testing.T) {
 	if !doc.HasField("safe") {
 		t.Fatal("HasField(safe) = false")
 	}
+	fields := doc.ObjectFields()
+	if len(fields) != 2 || fields[0].Key != "name" || fields[1].Key != "safe" {
+		t.Fatalf("ObjectFields() = %#v", fields)
+	}
 	if got := doc.ToJSON(); got != `{"name":"Patches","safe":true}` {
 		t.Fatalf("ToJSON() = %q", got)
 	}

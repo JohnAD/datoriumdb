@@ -151,12 +151,11 @@ func (s *HTTPServer) handleSchemaHistory(w http.ResponseWriter, r *http.Request,
 		}))
 		return
 	}
-	var schema any
-	_ = json.Unmarshal(raw, &schema)
+	// Embed as RawMessage so field order is not destroyed by map[string]any.
 	writeJSON(w, envelope.OK(map[string]any{
 		"collection": collection,
 		"version":    ver,
-		"schema":     schema,
+		"schema":     json.RawMessage(raw),
 	}))
 }
 
