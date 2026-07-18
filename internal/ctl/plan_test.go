@@ -85,6 +85,21 @@ func TestReindentJSONPreservesFieldOrder(t *testing.T) {
 	}
 }
 
+func TestReindentJSONPrettyPrintsCompactSchema(t *testing.T) {
+	raw := []byte(`{"kind":"object","children":[{"name":"title","kind":"string","required":true},{"name":"owner","kind":"string","format":"DatoriumDirectRef","required":true}]}`)
+	out, err := ReindentJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if indexOf(s, "{\n  \"kind\": \"object\"") < 0 {
+		t.Fatalf("expected pretty-printed kind-first schema, got:\n%s", s)
+	}
+	if indexOf(s, `"kind"`) > indexOf(s, `"children"`) {
+		t.Fatalf("expected kind before children:\n%s", s)
+	}
+}
+
 func TestReindentJSONRejectsInvalidJSON(t *testing.T) {
 	if _, err := ReindentJSON([]byte("not json")); err == nil {
 		t.Fatal("expected error for invalid JSON")

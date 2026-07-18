@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
+	"github.com/JohnAD/ojson"
 )
 
 const (
@@ -337,14 +339,85 @@ func (w *Worker) fetchEstablishment(ctx context.Context) (*establishResponse, er
 	}
 	defer resp.Body.Close()
 
-	var doc establishResponse
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read establish response (status %d): %w", resp.StatusCode, err)
+	}
+	doc, err := parseEstablishResponse(body)
+	if err != nil {
 		return nil, fmt.Errorf("decode establish response (status %d): %w", resp.StatusCode, err)
 	}
 	if !doc.OK {
 		return nil, fmt.Errorf("establish request failed: %s", firstErrorMessage(doc.Errors))
 	}
-	return &doc, nil
+	return doc, nil
+}
+
+func parseEstablishResponse(body []byte) (*establishResponse, error) {
+	root, err := ojson.ReadBytesNoSchema(body)
+	if err != nil {
+		return nil, err
+	}
+	if !root.IsObject() {
+		return nil, fmt.Errorf("establish response root must be an object")
+	}
+	doc := &establishResponse{
+		Schemas:  map[string]schemaEntry{},
+		Searches: map[string]map[string]json.RawMessage{},
+	}
+	ok, err := root.Get("ok").ToBoolTry()
+	if err != nil {
+		return nil, fmt.Errorf("missing or invalid ok field: %w", err)
+	}
+	doc.OK = ok
+	if errs := root.Get("errors"); errs.IsArray() {
+		for i := 0; i < errs.Len(); i++ {
+			item := errs.At(i)
+			doc.Errors = append(doc.Errors, responseError{
+				Code:    item.Get("code").String(),
+				Message: item.Get("message").String(),
+			})
+		}
+	}
+	if !doc.OK {
+		return doc, nil
+	}
+	doc.General = rawJSONField(root, "general")
+	doc.Servers = rawJSONField(root, "servers")
+	doc.ShardMap = rawJSONField(root, "shardMap")
+	doc.Auth = rawJSONField(root, "auth")
+
+	for _, field := range root.Get("schemas").ObjectFields() {
+		entryObj := field.Value
+		ver, err := entryObj.Get("version").ToIntTry()
+		if err != nil {
+			return nil, fmt.Errorf("schemas.%s.version: %w", field.Key, err)
+		}
+		schemaVal := entryObj.Get("schema")
+		if schemaVal.IsVoid() || schemaVal.IsMissing() {
+			return nil, fmt.Errorf("schemas.%s.schema is required", field.Key)
+		}
+		doc.Schemas[field.Key] = schemaEntry{
+			Version: ver,
+			Schema:  json.RawMessage(schemaVal.ToJSONBytes()),
+		}
+	}
+	for _, coll := range root.Get("searches").ObjectFields() {
+		inner := map[string]json.RawMessage{}
+		for _, search := range coll.Value.ObjectFields() {
+			inner[search.Key] = json.RawMessage(search.Value.ToJSONBytes())
+		}
+		doc.Searches[coll.Key] = inner
+	}
+	return doc, nil
+}
+
+func rawJSONField(root ojson.JSONValue, key string) json.RawMessage {
+	v := root.Get(key)
+	if v.IsVoid() || v.IsMissing() {
+		return json.RawMessage("{}")
+	}
+	return json.RawMessage(v.ToJSONBytes())
 }
 
 // --- local cache -------------------------------------------------------------
@@ -398,23 +471,26 @@ func writeWrapped(path, key string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
 	}
-	obj := map[string]json.RawMessage{key: raw}
-	data, err := json.MarshalIndent(obj, "", "  ")
+	inner, err := ojson.ReadBytesNoSchema(raw)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	return fsstore.WriteFileAtomic(path, data, 0o644)
+	root := ojson.NewObject()
+	root.Set(key, inner)
+	pretty, err := config.PrettyJSONBytes(root.ToJSONBytes())
+	if err != nil {
+		return err
+	}
+	return fsstore.WriteFileAtomic(path, pretty, 0o644)
 }
 
 func writeRaw(path string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
 	}
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+	pretty, err := config.PrettyJSONBytes(raw)
+	if err != nil {
 		return err
 	}
-	pretty.WriteByte('\n')
-	return fsstore.WriteFileAtomic(path, pretty.Bytes(), 0o644)
+	return fsstore.WriteFileAtomic(path, pretty, 0o644)
 }

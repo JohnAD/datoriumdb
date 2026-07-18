@@ -192,13 +192,11 @@ func cmdCollectionShow(ctx *Context, args []string) Outcome {
 		raw = cfg.Schemas[name]
 		version = cfg.SchemaVersion(name)
 	}
-	var schema any
-	_ = json.Unmarshal(raw, &schema)
 	fields := map[string]any{
 		"command":    "collection.show",
 		"collection": name,
 		"version":    version,
-		"schema":     schema,
+		"schema":     json.RawMessage(raw),
 	}
 	human := fmt.Sprintf("collection: %s\nversion: %d\nschema:\n%s\n", name, version, string(raw))
 	return OKHuman(fields, human)

@@ -1,12 +1,12 @@
 package ctl
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -109,6 +109,8 @@ func (p *Plan) Commit() error {
 }
 
 // MarshalPretty renders v as 2-space-indented JSON with a trailing newline.
+// Prefer ReindentJSON / config.PrettyJSONBytes when the source is already
+// JSON text whose field order must be preserved (Go maps lose order).
 func MarshalPretty(v any) ([]byte, error) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -117,15 +119,8 @@ func MarshalPretty(v any) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// ReindentJSON reformats raw JSON bytes with 2-space indentation while
-// preserving the original object field order, and appends a trailing
-// newline. It fails if raw is not valid JSON.
+// ReindentJSON reformats raw JSON with OJSON: 2-space indentation, trailing
+// newline, original object field order preserved.
 func ReindentJSON(raw []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, raw, "", "  "); err != nil {
-		return nil, err
-	}
-	out := buf.Bytes()
-	out = append(out, '\n')
-	return out, nil
+	return config.PrettyJSONBytes(raw)
 }
