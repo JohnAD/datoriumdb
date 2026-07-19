@@ -221,14 +221,14 @@ func TestCommandRequiresPlainTextContentType(t *testing.T) {
 	ts, _, issuer := testHarness(t)
 	token, _, _ := issuer.IssueClientToken("alice", 0)
 
-	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", `create Movies null {}`, token)
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", `create Movies 01TESTMOVIES00000000000001 {}`, token)
 	env := decodeEnvelope(t, resp)
 	if env["ok"] != false || firstErrCode(t, env) != "contentTypeRequired" {
 		t.Fatalf("expected contentTypeRequired, got %#v", env)
 	}
 
 	resp = doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8",
-		`create Movies null {$: Movies:0, title: "The Matrix"}`, token)
+		`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "The Matrix"}`, token)
 	env = decodeEnvelope(t, resp)
 	if env["ok"] != true {
 		t.Fatalf("expected command to succeed: %#v", env)
@@ -248,7 +248,7 @@ func TestCommandBodyTooLarge(t *testing.T) {
 
 func TestCommandWithoutTokenFails(t *testing.T) {
 	ts, _, _ := testHarness(t)
-	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8", "create Movies null {}", "")
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8", "create Movies 01TESTMOVIES00000000000003 {}", "")
 	env := decodeEnvelope(t, resp)
 	if env["ok"] != false || firstErrCode(t, env) != "unauthenticated" {
 		t.Fatalf("expected unauthenticated, got %#v", env)

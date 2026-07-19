@@ -1,30 +1,41 @@
 package engine
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/JohnAD/datoriumdb/internal/replication"
 )
 
-func TestIdempotentRetryCreateReturnsSameResponse(t *testing.T) {
+func TestCreateRetrySameIDReturnsDocumentExists(t *testing.T) {
 	eng := testEngine(t)
-	first := eng.Execute(`create Movies null {operationId: 01OPTESTCREATE00000000001, $: Movies:0, title: "x"}`)
+	id := "01TESTCREATE0000000000001"
+	first := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "x"}`)
 	if first["ok"] != true {
 		t.Fatalf("first create failed: %#v", first)
 	}
-	second := eng.Execute(`create Movies null {operationId: 01OPTESTCREATE00000000001, $: Movies:0, title: "x"}`)
-	if second["ok"] != true {
-		t.Fatalf("retried create must still report success: %#v", second)
+	second := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "x"}`)
+	if second["ok"] != false {
+		t.Fatalf("retried create with the same id must fail: %#v", second)
 	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("expected identical replayed response.\nfirst:  %#v\nsecond: %#v", first, second)
+	if code := firstErrorCode(second); code != "documentExists" {
+		t.Fatalf("expected documentExists, got %#v", second)
 	}
 }
 
-func TestIdempotentRetryPatchDoesNotReapply(t *testing.T) {
+func TestCreateRejectsNullID(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x", status: unreleased}`)
+	res := eng.Execute(`create Movies null {$: Movies:0, title: "x"}`)
+	if res["ok"] != false {
+		t.Fatalf("expected failure: %#v", res)
+	}
+	if code := firstErrorCode(res); code != "documentIdRequired" {
+		t.Fatalf("expected documentIdRequired, got %#v", res)
+	}
+}
+
+func TestPatchRetryAfterSuccessReturnsVersionMismatch(t *testing.T) {
+	eng := testEngine(t)
+	created := eng.Execute(`create Movies 01TESTPATCH00000000000001 {$: Movies:0, title: "x", status: unreleased}`)
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
@@ -33,26 +44,20 @@ func TestIdempotentRetryPatchDoesNotReapply(t *testing.T) {
 	if first["ok"] != true {
 		t.Fatalf("first patch failed: %#v", first)
 	}
+	// Patch does not keep durable per-operation replay state. A retry
+	// against the pre-patch version is versionMismatch.
 	second := eng.Execute(patchCmd)
-	if second["ok"] != true {
-		t.Fatalf("retried patch must still report success: %#v", second)
+	if second["ok"] != false {
+		t.Fatalf("retried patch must fail once the version has moved: %#v", second)
 	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("expected identical replayed response.\nfirst:  %#v\nsecond: %#v", first, second)
-	}
-
-	// A third, truly new patch attempt against the now-stale "before"
-	// version must fail normally (this proves the retry above did not
-	// silently re-apply and bump the version a second time).
-	third := eng.Execute(patchCmd)
-	if !reflect.DeepEqual(first, third) {
-		t.Fatalf("expected a third replay to still return the cached response: %#v", third)
+	if code := firstErrorCode(second); code != "versionMismatch" {
+		t.Fatalf("expected versionMismatch, got %#v", second)
 	}
 }
 
-func TestIdempotentRetryDeleteAfterDocumentGone(t *testing.T) {
+func TestDeleteRetryAfterGoneReturnsDocumentNotFound(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x"}`)
+	created := eng.Execute(`create Movies 01TESTDELETE0000000000001 {$: Movies:0, title: "x"}`)
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
@@ -61,23 +66,24 @@ func TestIdempotentRetryDeleteAfterDocumentGone(t *testing.T) {
 	if first["ok"] != true {
 		t.Fatalf("first delete failed: %#v", first)
 	}
-	// Without idempotent replay, retrying against an already-deleted
-	// document would normally return documentNotFound.
+	// Delete does not keep durable per-operation replay state. A retry
+	// after the document is gone is documentNotFound (READ apply of the
+	// staged pending delete remains idempotent on its own).
 	second := eng.Execute(deleteCmd)
-	if second["ok"] != true {
-		t.Fatalf("retried delete must still report success even though the document is now gone: %#v", second)
+	if second["ok"] != false {
+		t.Fatalf("retried delete must fail once the document is gone: %#v", second)
 	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("expected identical replayed response.\nfirst:  %#v\nsecond: %#v", first, second)
+	if code := firstErrorCode(second); code != "documentNotFound" {
+		t.Fatalf("expected documentNotFound, got %#v", second)
 	}
 }
 
-func TestFreshOperationIDsAreNotTreatedAsRetries(t *testing.T) {
+func TestDistinctCreateIDsAreIndependent(t *testing.T) {
 	eng := testEngine(t)
-	first := eng.Execute(`create Movies null {operationId: 01OPTESTFRESH0000000001A, $: Movies:0, title: "x"}`)
-	second := eng.Execute(`create Movies null {operationId: 01OPTESTFRESH0000000001B, $: Movies:0, title: "y"}`)
+	first := eng.Execute(`create Movies 01TESTFRESH0000000000001A {$: Movies:0, title: "x"}`)
+	second := eng.Execute(`create Movies 01TESTFRESH0000000000001B {$: Movies:0, title: "y"}`)
 	if first["ok"] != true || second["ok"] != true {
-		t.Fatalf("expected both distinct-operationId creates to succeed: %#v / %#v", first, second)
+		t.Fatalf("expected both creates to succeed: %#v / %#v", first, second)
 	}
 	if first["id"] == second["id"] {
 		t.Fatalf("expected two distinct documents, got the same id for both")

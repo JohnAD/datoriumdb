@@ -32,7 +32,7 @@ func TestComposeAuthBootstrapSucceedsWithCorrectSecret(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "compose-auth-bootstrap-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies null {$: Movies:0, title: "Auth Bootstrap Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Auth Bootstrap Test"}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

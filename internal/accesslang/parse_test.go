@@ -3,11 +3,11 @@ package accesslang
 import "testing"
 
 func TestParseCommandAndDetail(t *testing.T) {
-	cmd, err := Parse(`create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}`)
+	cmd, err := Parse(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cmd.Word != "create" || cmd.Target != "Movies" || cmd.Parm != "null" {
+	if cmd.Word != "create" || cmd.Target != "Movies" || cmd.Parm != "01TESTMOVIES00000000000001" {
 		t.Fatalf("unexpected command parts: %+v", cmd)
 	}
 	detail, err := ParseDetail(cmd.Detail)

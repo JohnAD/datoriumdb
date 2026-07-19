@@ -33,7 +33,7 @@ func TestComposeProxyReadReceivesReplicatedWritesButIsNotAReadTarget(t *testing.
 	token := testutil.ClientToken(t, cfg, "compose-proxy-read-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies null {$: Movies:0, title: "Proxy Read Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Proxy Read Test"}`)
 	if err != nil {
 		t.Fatalf("create on SOT: %v", err)
 	}

@@ -13,11 +13,10 @@ import (
 
 // TestComposeDegradedReplicationRecovers brings up
 // deploy/docker-compose.degraded-replication.yml, stops the read-member
-// container to simulate an outage, confirms the SOT still accepts writes
-// (returning ok:true plus a note naming the down member and a durable
-// pending write, tech-docs/REPLICATION-FAILURE-HANDLING.md), restarts the
-// read-member, and confirms its catch-up loop repairs the gap without any
-// operator action beyond bringing the container back up.
+// container to simulate an outage, confirms the SOT still accepts creates
+// (ok:true after one-shot delivery + pending for the down member), restarts
+// the read-member, and confirms its catch-up loop repairs the gap without
+// any operator action beyond bringing the container back up.
 func TestComposeDegradedReplicationRecovers(t *testing.T) {
 	c := Up(t, "docker-compose.degraded-replication.yml")
 	baseA := "http://127.0.0.1:8080"
@@ -36,7 +35,7 @@ func TestComposeDegradedReplicationRecovers(t *testing.T) {
 		t.Fatalf("stop serverB: %v\n%s", err, out)
 	}
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies null {$: Movies:0, title: "Degraded Replication Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Degraded Replication Test"}`)
 	if err != nil {
 		t.Fatalf("create while serverB is down: %v", err)
 	}
@@ -45,7 +44,7 @@ func TestComposeDegradedReplicationRecovers(t *testing.T) {
 	}
 	note, hasNote := created["note"].(map[string]any)
 	if !hasNote {
-		t.Fatalf("expected a note describing incomplete replication: %#v", created)
+		t.Fatalf("expected a note naming the unacknowledged read-member: %#v", created)
 	}
 	var unacked []string
 	if raw, ok := note["unacknowledged"].([]any); ok {

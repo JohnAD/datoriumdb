@@ -51,7 +51,7 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "great!"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000001 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "great!"}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -83,7 +83,7 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 
 func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__unknownMovie", text: "x"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000002 {$: Reviews:0, movieRef: "@@__Movies__unknownMovie", text: "x"}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -115,7 +115,7 @@ func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 
 func TestReadWithoutCacheSummariesFlagOmitsField(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "x"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000003 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "x"}`)
 	id, _ := created["id"].(string)
 	read := eng.Execute(`read Reviews ` + id + ` {}`)
 	if read["ok"] != true {
@@ -123,5 +123,64 @@ func TestReadWithoutCacheSummariesFlagOmitsField(t *testing.T) {
 	}
 	if _, ok := read["cacheSummaries"]; ok {
 		t.Fatalf("expected cacheSummaries to be omitted when not requested")
+	}
+}
+
+const engineNestedReviewsSchema = `{
+  "kind": "object",
+  "children": [
+    {"name": "text", "kind": "string"},
+    {"name": "meta", "kind": "object", "children": [
+      {"name": "movieRef", "kind": "string", "format": "DatoriumCachedRef",
+        "custom": {"collections": ["Movies"], "summary": ["title"]}}
+    ]}
+  ]
+}`
+
+func TestReadCacheSummariesFindsNestedCachedRefs(t *testing.T) {
+	eng := testEngine(t)
+	if err := os.WriteFile(filepath.Join(eng.ConfigDir, "Reviews.schema.json"), []byte(engineNestedReviewsSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eng.ConfigDir, "Reviews.schema.0.json"), []byte(engineNestedReviewsSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.WriteWorkItem(eng.DataDir, eng.ServerName, cache.WorkItem{
+		SourceCollection: "Movies", SourceDocumentID: "movieNested", Command: "create",
+		AfterVersion: "v1", Payload: map[string]any{"!": "movieNested", "#": "v1", "title": "Nested"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.EnsureStub(eng.DataDir, "Movies", "movieNested"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := cache.ReadWorkItem(eng.DataDir, "Movies", eng.ServerName, "movieNested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Apply(eng.DataDir, *item); err != nil {
+		t.Fatal(err)
+	}
+
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000004 {$: Reviews:0, text: "x", meta: {movieRef: "@@__Movies__movieNested"}}`)
+	if created["ok"] != true {
+		t.Fatalf("create failed: %#v", created)
+	}
+	id, _ := created["id"].(string)
+	read := eng.Execute(`read Reviews ` + id + ` {cacheSummaries: true}`)
+	if read["ok"] != true {
+		t.Fatalf("read failed: %#v", read)
+	}
+	summaries, _ := read["cacheSummaries"].(map[string]any)
+	movies, _ := summaries["Movies"].(map[string]any)
+	movie, ok := movies["movieNested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested movieRef to produce a cache summary, got %#v", summaries)
+	}
+	if movie["title"] != "Nested" {
+		t.Fatalf("expected nested ref title, got %#v", movie)
 	}
 }

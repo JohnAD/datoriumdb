@@ -231,17 +231,22 @@ This is too complex for DatoriumDB's replication model and does not sufficiently
 
 DatoriumDB writes are allowed to be slow.
 
-On the happy path, a `SHARD_SOT_MEMBER` should:
+### Create, patch, and delete (current)
 
-1. validate the command
+On the happy path for `create`, `patch`, and `delete`, a `SHARD_SOT_MEMBER` should:
+
+1. validate the command (create requires a client-supplied document ID; patch/delete require a matching `#` version)
 2. apply the write to its local source-of-truth storage
-3. send the write to all read members for the shard slot
-4. wait for acknowledgement from those read members, with a bounded timeout
-5. return success to the API caller
+3. make **one** live delivery attempt to each assigned `SHARD_READ_MEMBER` and `PROXY_READ_MEMBER` for that shard slot (excluding itself when it also holds a read role), in parallel, each with a bounded timeout (a reasonable starting value is 10 seconds)
+4. for each target that acknowledges → that target is finished for this write
+5. for each target that does not acknowledge → write exactly one durable `.pendingWrites` entry for that target, then stop worrying about it
+6. return success to the API caller (optionally including a `note` naming unacknowledged targets)
 
-A reasonable starting timeout is 10 seconds.
+The SOT does **not** retry failed targets and does **not** keep durable per-operation catch-up state beyond the presence of `.pendingWrites` files. Once every target has either acknowledged or received a pending file, the write is finished from the SOT's point of view. Each read/proxy member is responsible for checking in, applying its pending work, and deleting those pending files through the API.
 
-For replication, all read members are treated the same. This includes both `SHARD_READ_MEMBER` and `PROXY_READ_MEMBER`.
+Delete application on READ members is idempotent: a document that is already gone is treated as successfully applied. Create and patch application are also idempotent when the local version already matches the work item.
+
+For replication delivery, all read members are treated the same. This includes both `SHARD_READ_MEMBER` and `PROXY_READ_MEMBER`.
 
 ## Failure Semantics
 
@@ -256,15 +261,17 @@ Examples:
 - local SOT storage failure
 - local SOT write verification failure
 
-If the SOT-member successfully applies the write locally but cannot reach one or more read members within the timeout, the API response still returns success.
+If the SOT-member successfully applies the write locally but one or more read members do not acknowledge the one-time delivery attempt, the API response still returns success.
 
-In that case, the SOT-member records durable missing-patch entries in the collection's `.pendingWrites` directory and includes a `note` object in the response. The smart client may ignore the note or handle it, depending on the application code.
+In that case, the SOT-member records durable `.pendingWrites` entries for only those unacknowledged targets and includes a `note` object in the response. The smart client may ignore the note or handle it, depending on the application code. The SOT does not retry; those read members are responsible for catch-up.
 
 This makes the response honest:
 
 - the source-of-truth write succeeded
 - some read members may be temporarily stale
-- repair has been scheduled
+- catch-up work exists as `.pendingWrites` for those members
+
+Choosing separate SOT and READ servers means embracing that temporary staleness window so read and write capacity can scale independently. See [SHARDING.md](SHARDING.md).
 
 To make retries safe, every write operation still needs an idempotent operation ID.
 

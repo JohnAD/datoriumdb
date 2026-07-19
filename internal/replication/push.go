@@ -102,11 +102,37 @@ func (c *Coordinator) TargetsForAssignment(assignment config.ShardAssignment) []
 	return out
 }
 
-// ReplicateDocumentWrite pushes item to every target in parallel, waiting
-// up to Timeout for each. Any target that does not acknowledge gets a
-// durable .pendingWrites entry (REPLICATION-FAILURE-HANDLING.md's
-// "Pending Writes Layout") so a later read-member catch-up can finish the
-// job.
+// StagePendingWrites durably records item under .pendingWrites for every
+// target without attempting live delivery. Prefer DeliverOnce for create,
+// patch, and delete; this helper remains for tests and callers that only
+// need the durable backlog.
+func (c *Coordinator) StagePendingWrites(item DocumentWorkItem, targets []string) error {
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+		if err := WritePendingWrite(c.DataDir, item.Collection, target, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeliverOnce is the SOT write-delivery contract for create, patch, and
+// delete: one live delivery attempt per target (in parallel, each bounded
+// by Timeout). A target that acknowledges is finished. A target that does
+// not gets exactly one durable .pendingWrites entry, after which the SOT
+// stops worrying about that target — READ/proxy catch-up owns the rest.
+//
+// The SOT does not retry failed targets and does not keep durable
+// per-operation catch-up state beyond the presence of pending files.
+func (c *Coordinator) DeliverOnce(ctx context.Context, item DocumentWorkItem, targets []string) PushOutcome {
+	return c.ReplicateDocumentWrite(ctx, item, targets)
+}
+
+// ReplicateDocumentWrite is the underlying one-shot push used by
+// DeliverOnce (and by ResumeIncomplete for any leftover .operations
+// records). Prefer DeliverOnce at call sites for new write paths.
 func (c *Coordinator) ReplicateDocumentWrite(ctx context.Context, item DocumentWorkItem, targets []string) PushOutcome {
 	outcome := PushOutcome{
 		Required:  append([]string{}, targets...),
@@ -183,7 +209,7 @@ const NoteCode = "replication_retry_scheduled"
 func BuildNote(outcome PushOutcome) map[string]any {
 	return map[string]any{
 		"code":           NoteCode,
-		"message":        "Write succeeded on the SOT-member, but one or more read members did not acknowledge within the timeout. Pending write work has been scheduled.",
+		"message":        "Write succeeded on the SOT-member, but one or more read members did not acknowledge the one-time delivery attempt. Durable .pendingWrites entries were recorded; those read members are responsible for catch-up.",
 		"required":       nonNilStrings(outcome.Required),
 		"acknowledged":   nonNilStrings(outcome.Acknowledged),
 		"unacknowledged": nonNilStrings(outcome.Unacknowledged),

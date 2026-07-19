@@ -107,12 +107,6 @@ func (e *Engine) Execute(line string) envelope.Result {
 
 func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.Result {
 	collection := cmd.Target
-	opID := stringField(detail, "operationId")
-	if opID != "" {
-		if cached, ok := e.idempotentReplay(opID); ok {
-			return cached
-		}
-	}
 	schemaRaw, ok := e.Cfg.Schemas[collection]
 	if !ok {
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection}, envelope.Error{
@@ -121,15 +115,11 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 		})
 	}
 	id := cmd.Parm
-	if id == "null" {
-		var err error
-		id, err = e.ids().New()
-		if err != nil {
-			return envelope.Fail(map[string]any{"command": "create", "collection": collection}, envelope.Error{
-				Code:    "idGenerationFailed",
-				Message: err.Error(),
-			})
-		}
+	if id == "" || id == "null" {
+		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentIdRequired",
+			Message: "create requires a client-supplied document id; server-side id generation is not supported",
+		})
 	}
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
@@ -140,6 +130,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 	if wrong := e.checkRouting(id, "create", collection); wrong != nil {
 		return *wrong
 	}
+	opID := stringField(detail, "operationId")
 	if opID == "" {
 		var err error
 		opID, err = e.ids().New()
@@ -205,59 +196,47 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 		doc[k] = v
 	}
 	path := fsstore.DocumentPath(e.DataDir, collection, id)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if _, err := os.Stat(path); err == nil {
-		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
-			Code:    "documentExists",
-			Message: "document already exists",
-		})
-	}
-	if err := fsstore.EnsureCollectionDir(e.DataDir, collection); err != nil {
-		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
-			Code:    "filesystemError",
-			Message: err.Error(),
-		})
-	}
-	op, opErr := replication.Begin(e.DataDir, replication.DocumentWorkItem{
+	item := replication.DocumentWorkItem{
 		Collection:   collection,
 		ID:           id,
 		AfterVersion: version,
 		OperationID:  opID,
 		Command:      "create",
 		Payload:      doc,
-	})
-	if opErr != nil {
+	}
+
+	e.mu.Lock()
+	if _, err := os.Stat(path); err == nil {
+		e.mu.Unlock()
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: opErr.Error(),
+			Code:    "documentExists",
+			Message: "document already exists",
 		})
 	}
-	if err := op.SetState(e.DataDir, replication.StateValidated); err != nil {
-		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: err.Error(),
-		})
-	}
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
-		_ = op.SetState(e.DataDir, replication.StateFailed)
+	if err := fsstore.EnsureCollectionDir(e.DataDir, collection); err != nil {
+		e.mu.Unlock()
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
 			Code:    "filesystemError",
 			Message: err.Error(),
 		})
 	}
-	if err := op.SetState(e.DataDir, replication.StateCommittedLocal); err != nil {
+	// Local SOT commit under the lock; one-shot delivery runs after unlock
+	// so network timeouts never hold the engine mutex.
+	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
+		e.mu.Unlock()
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
+			Code:    "filesystemError",
 			Message: err.Error(),
 		})
 	}
 	if err := fsstore.EnqueueChange(e.DataDir, collection, id, "create"); err != nil {
+		e.mu.Unlock()
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
 			Code:    "queueWriteFailed",
 			Message: err.Error(),
 		})
 	}
+	e.mu.Unlock()
 	result := envelope.OK(map[string]any{
 		"command":     "create",
 		"collection":  collection,
@@ -266,7 +245,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 		"#":           version,
 		"operationId": opID,
 	})
-	return e.finalizeWrite(op, result)
+	return e.deliverOnce(item, result)
 }
 
 func (e *Engine) read(cmd accesslang.Command, detail map[string]any) envelope.Result {
@@ -319,11 +298,6 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 	collection := cmd.Target
 	id := cmd.Parm
 	opID := stringField(detail, "operationId")
-	if opID != "" {
-		if cached, ok := e.idempotentReplay(opID); ok {
-			return cached
-		}
-	}
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDocumentId",
@@ -342,7 +316,12 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 	}
 	path := fsstore.DocumentPath(e.DataDir, collection, id)
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	localDone := false
+	defer func() {
+		if !localDone {
+			e.mu.Unlock()
+		}
+	}()
 	doc, err := fsstore.ReadDocumentJSON(path)
 	if err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
@@ -438,13 +417,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			})
 		}
 	}
-	if err := fsstore.PreservePreviousIfAbsent(e.DataDir, collection, id); err != nil {
-		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
-			Code:    "filesystemError",
-			Message: err.Error(),
-		})
-	}
-	op, opErr := replication.Begin(e.DataDir, replication.DocumentWorkItem{
+	item := replication.DocumentWorkItem{
 		Collection:    collection,
 		ID:            id,
 		BeforeVersion: expectedVer,
@@ -452,29 +425,16 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 		OperationID:   opID,
 		Command:       "patch",
 		Patch:         replicatedOps,
-	})
-	if opErr != nil {
-		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: opErr.Error(),
-		})
 	}
-	if err := op.SetState(e.DataDir, replication.StateValidated); err != nil {
-		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: err.Error(),
-		})
-	}
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
-		_ = op.SetState(e.DataDir, replication.StateFailed)
+	if err := fsstore.PreservePreviousIfAbsent(e.DataDir, collection, id); err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "filesystemError",
 			Message: err.Error(),
 		})
 	}
-	if err := op.SetState(e.DataDir, replication.StateCommittedLocal); err != nil {
+	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
+			Code:    "filesystemError",
 			Message: err.Error(),
 		})
 	}
@@ -484,6 +444,8 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Message: err.Error(),
 		})
 	}
+	localDone = true
+	e.mu.Unlock()
 	result := envelope.OK(map[string]any{
 		"command":     "patch",
 		"collection":  collection,
@@ -495,18 +457,12 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			"after":  after,
 		},
 	})
-	return e.finalizeWrite(op, result)
+	return e.deliverOnce(item, result)
 }
 
 func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.Result {
 	collection := cmd.Target
 	id := cmd.Parm
-	opID := stringField(detail, "operationId")
-	if opID != "" {
-		if cached, ok := e.idempotentReplay(opID); ok {
-			return cached
-		}
-	}
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDocumentId",
@@ -518,7 +474,12 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 	}
 	path := fsstore.DocumentPath(e.DataDir, collection, id)
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	localDone := false
+	defer func() {
+		if !localDone {
+			e.mu.Unlock()
+		}
+	}()
 	doc, err := fsstore.ReadDocumentJSON(path)
 	if err != nil {
 		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
@@ -537,6 +498,7 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 			Actual:   actualVer,
 		})
 	}
+	opID := stringField(detail, "operationId")
 	if opID == "" {
 		opID, err = e.ids().New()
 		if err != nil {
@@ -546,36 +508,19 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 			})
 		}
 	}
-	op, opErr := replication.Begin(e.DataDir, replication.DocumentWorkItem{
+	item := replication.DocumentWorkItem{
 		Collection:    collection,
 		ID:            id,
 		BeforeVersion: expectedVer,
 		AfterVersion:  expectedVer,
 		OperationID:   opID,
 		Command:       "delete",
-	})
-	if opErr != nil {
-		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: opErr.Error(),
-		})
 	}
-	if err := op.SetState(e.DataDir, replication.StateValidated); err != nil {
-		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
-			Message: err.Error(),
-		})
-	}
+
+	// Local SOT soft-delete under the lock; one-shot delivery after unlock.
 	if err := fsstore.SoftDeleteDocument(e.DataDir, collection, id); err != nil {
-		_ = op.SetState(e.DataDir, replication.StateFailed)
 		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
 			Code:    "filesystemError",
-			Message: err.Error(),
-		})
-	}
-	if err := op.SetState(e.DataDir, replication.StateCommittedLocal); err != nil {
-		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
-			Code:    "operationTrackingFailed",
 			Message: err.Error(),
 		})
 	}
@@ -585,6 +530,8 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 			Message: err.Error(),
 		})
 	}
+	localDone = true
+	e.mu.Unlock()
 	result := envelope.OK(map[string]any{
 		"command":     "delete",
 		"collection":  collection,
@@ -592,7 +539,7 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 		"#":           expectedVer,
 		"operationId": opID,
 	})
-	return e.finalizeWrite(op, result)
+	return e.deliverOnce(item, result)
 }
 
 func restrictedPointer(p string) bool {
@@ -712,43 +659,22 @@ func containsServer(list []string, want string) bool {
 	return false
 }
 
-// idempotentReplay implements REPLICATION-FAILURE-HANDLING.md's
-// idempotency requirement: a retry with the same operationId after a local
-// commit already happened must not re-apply the write, and must return the
-// exact response the caller would have received the first time.
-func (e *Engine) idempotentReplay(operationID string) (envelope.Result, bool) {
-	op, err := replication.Load(e.DataDir, operationID)
-	if err != nil || op.Response == nil {
-		return nil, false
+// deliverOnce runs the one-shot live delivery contract for a just-committed
+// create/patch/delete: try each read/proxy target once; stage .pendingWrites
+// only for targets that do not acknowledge; optionally attach a response
+// note naming those targets. After this returns, the SOT is done — READ
+// members own catch-up. There is no durable .operations tracking.
+func (e *Engine) deliverOnce(item replication.DocumentWorkItem, result envelope.Result) envelope.Result {
+	if e.Replicator == nil {
+		return result
 	}
-	switch op.State {
-	case replication.StateCommittedLocal, replication.StateReplicating, replication.StateReplicated:
-		return op.Response, true
-	default:
-		return nil, false
+	slot := shard.Slot(item.ID)
+	assignment := replication.AssignmentForSlot(e.Cfg, slot)
+	targets := e.Replicator.TargetsForAssignment(assignment)
+	outcome := e.Replicator.DeliverOnce(context.Background(), item, targets)
+	if !outcome.Complete() {
+		result["note"] = replication.BuildNote(outcome)
 	}
-}
-
-// finalizeWrite runs happy-path replication for a just-committed write
-// (SHARDING.md / REPLICATION-FAILURE-HANDLING.md): push to every read and
-// proxy member of the shard slot, add a response "note" when one or more
-// targets do not acknowledge within the timeout, and durably persist the
-// final response so a duplicate client retry by operationId can be
-// answered without re-executing the write.
-func (e *Engine) finalizeWrite(op *replication.Operation, result envelope.Result) envelope.Result {
-	if e.Replicator != nil {
-		slot := shard.Slot(op.Item.ID)
-		assignment := replication.AssignmentForSlot(e.Cfg, slot)
-		targets := e.Replicator.TargetsForAssignment(assignment)
-		note, err := e.Replicator.ReplicateOperation(context.Background(), op, targets)
-		if err == nil && note != nil {
-			result["note"] = note
-		}
-	} else {
-		_ = op.SetState(e.DataDir, replication.StateReplicated)
-	}
-	op.Response = result
-	_ = op.Save(e.DataDir)
 	return result
 }
 

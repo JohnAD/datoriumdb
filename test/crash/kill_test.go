@@ -62,7 +62,8 @@ func TestSIGKILLDuringConcurrentWritesPreservesDurability(t *testing.T) {
 				default:
 				}
 				title := fmt.Sprintf("Writer %d Doc %d", w, i)
-				res, err := testutil.PostCommand(ctx, srv.BaseURL, token, fmt.Sprintf(`create Movies null {$: Movies:0, title: %q}`, title))
+				id := fmt.Sprintf("01CRASHW%02dDOC%014d", w, i)
+				res, err := testutil.PostCommand(ctx, srv.BaseURL, token, fmt.Sprintf(`create Movies %s {$: Movies:0, title: %q}`, id, title))
 				if err != nil {
 					return // server likely just got killed
 				}
@@ -113,9 +114,9 @@ func TestSIGKILLDuringConcurrentWritesPreservesDurability(t *testing.T) {
 
 // TestKilledReadMemberCatchesUpAfterRestart kills the read-member outright
 // (not a graceful stop), writes to the SOT-member while it is down
-// (producing a durable pending write per REPLICATION-FAILURE-HANDLING.md),
-// restarts the read-member, and confirms its catch-up loop applies the
-// pending write and clears it without operator intervention.
+// (one-shot fails → .pendingWrites + note), restarts the read-member, and
+// confirms its catch-up loop applies the pending write without operator
+// intervention.
 func TestKilledReadMemberCatchesUpAfterRestart(t *testing.T) {
 	bin := testutil.BuildBinary(t, "datoriumdb")
 	topo := newTwoNodeTopology(t)
@@ -133,7 +134,7 @@ func TestKilledReadMemberCatchesUpAfterRestart(t *testing.T) {
 	// Hard-kill the read-member while it is otherwise healthy.
 	srvB.Kill(t)
 
-	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, `create Movies null {$: Movies:0, title: "Read Member Was Down"}`)
+	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Read Member Was Down"}`)
 	if err != nil {
 		t.Fatalf("create while read-member is down: %v", err)
 	}
@@ -142,10 +143,8 @@ func TestKilledReadMemberCatchesUpAfterRestart(t *testing.T) {
 	}
 	note, hasNote := created["note"].(map[string]any)
 	if !hasNote {
-		t.Fatalf("expected a note describing incomplete replication: %#v", created)
+		t.Fatalf("expected a note naming the unacknowledged read-member: %#v", created)
 	}
-	// note came back through a real HTTP JSON round trip, so array fields
-	// decode as []any rather than []string.
 	var unacked []string
 	if raw, ok := note["unacknowledged"].([]any); ok {
 		for _, v := range raw {

@@ -40,7 +40,7 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "integration-test-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, srv.BaseURL, token, `create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}`)
+	created, err := testutil.PostCommand(ctx, srv.BaseURL, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSingleNodeUnauthenticatedCommandRefused(t *testing.T) {
 		DataDir:          testutil.TempDataDir(t),
 	})
 
-	res, err := testutil.PostCommand(context.Background(), srv.BaseURL, "", `create Movies null {$: Movies:0, title: "The Matrix"}`)
+	res, err := testutil.PostCommand(context.Background(), srv.BaseURL, "", `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "The Matrix"}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

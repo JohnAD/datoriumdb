@@ -78,7 +78,18 @@ A read-member also refuses writes unless it is serving both roles for the shard 
 
 Similarly, unless it is serving both roles, an SOT-member only accepts writes for the shard slots assigned to it.
 
-When an SOT-member receives a write, it performs the slow and expensive write operation. On the happy path it pushes the write to all read members and waits for acknowledgement with a bounded timeout. If local SOT storage succeeds but one or more read members do not acknowledge in time, the API still returns success, durable `.pendingWrites` entries are recorded, and the response may include a `note`. See [REPLICATION-FAILURE-HANDLING.md](REPLICATION-FAILURE-HANDLING.md).
+When an SOT-member receives a `create`, `patch`, or `delete`, it performs the local source-of-truth write, makes one live delivery attempt to each assigned read/proxy member, and writes a `.pendingWrites` entry only for targets that do not acknowledge. After that, the SOT is done; each read/proxy member owns catch-up. See [REPLICATION-FAILURE-HANDLING.md](REPLICATION-FAILURE-HANDLING.md).
+
+### Separating SOT and READ is an intentional tradeoff
+
+Splitting `SHARD_SOT_MEMBER` from `SHARD_READ_MEMBER` is how DatoriumDB scales write and read capacity independently. That separation means a successful write on the SOT does **not** guarantee that every READ member already reflects it. A READ can temporarily serve a pre-write view (or refuse a document it knows is pending) until catch-up finishes. That possibility is not a defect in the model — it is the cost of independent scaling, and operators choose it when they assign roles.
+
+Deployments can soften or avoid that window by topology choices:
+
+- a combined SOT/READ machine for a shard slot can serve “paranoid” reads against local source-of-truth storage
+- additional only-READ members can absorb ordinary read traffic while accepting that they may lag briefly after a write
+
+Those are IT decisions. The database’s contract is: the SOT write succeeds when local SOT storage (and the one-shot delivery / pending staging step) succeeds; freshness of each READ member is that member’s responsibility afterward.
 
 Direct document references are resolved by smart clients, not by the database during a read response. The client uses the referenced document ID, computes the shard, and reads the referenced document from the correct machine.
 

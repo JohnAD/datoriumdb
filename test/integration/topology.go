@@ -53,6 +53,16 @@ func newTwoNodeTopology(t *testing.T) *twoNodeTopology {
 			"PROXY_READ_MEMBER": []
 		}}}
 	}`)
+	testutil.WriteFile(t, filepath.Join(configDirA, "__general.json"), `{
+		"general": {
+			"name": "DatoriumDB Integration Test",
+			"establishmentServer": "serverA",
+			"version": 1,
+			"readMemberCheckinSeconds": 1,
+			"cacheUpdateCheckinSeconds": 60,
+			"readMemberFailedCheckinsBeforeStale": 3
+		}
+	}`)
 
 	configDirB := filepath.Join(t.TempDir(), "serverB", ".config")
 

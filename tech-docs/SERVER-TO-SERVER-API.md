@@ -66,11 +66,15 @@ Transport-level failures can still occur when the server cannot be reached or th
 
 ## Happy-Path Document Write Delivery
 
-On the happy path, a `SHARD_SOT_MEMBER` pushes a write to each read member before creating any `.pendingWrites` file.
+### Create, patch, and delete
+
+For `create`, `patch`, and `delete`, after the local commit a `SHARD_SOT_MEMBER` makes one live delivery attempt to each assigned read/proxy member via:
 
 ```text
 POST /datoriumdb/v1/sys/apply-document-write
 ```
+
+A target that acknowledges is finished. A target that does not gets a matching `.pendingWrites` file; that member discovers the work through the pending-write list / catch-up APIs below. The SOT does not retry failed targets.
 
 Request body:
 

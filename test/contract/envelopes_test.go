@@ -27,7 +27,7 @@ func newContractEngine(t *testing.T) *engine.Engine {
 
 func TestGoldenCreateOK(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create Movies null {$: Movies:0, title: "The Matrix"}`)
+	res := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix"}`)
 	if res["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", res)
 	}
@@ -58,7 +58,7 @@ func TestGoldenCreateInvalidDocumentID(t *testing.T) {
 
 func TestGoldenCreateSchemaMismatch(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create Movies null {$: Movies:99, title: "The Matrix"}`)
+	res := eng.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:99, title: "The Matrix"}`)
 	if res["ok"] != false {
 		t.Fatalf("expected schema mismatch to fail: %#v", res)
 	}
@@ -137,7 +137,7 @@ func TestGoldenDeleteVersionMismatch(t *testing.T) {
 
 func TestGoldenCollectionNotFound(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create NoSuchCollection null {$: NoSuchCollection:0, title: "x"}`)
+	res := eng.Execute(`create NoSuchCollection 01TESTNOSUCH00000000000003 {$: NoSuchCollection:0, title: "x"}`)
 	if res["ok"] != false {
 		t.Fatalf("expected unknown collection to fail: %#v", res)
 	}
