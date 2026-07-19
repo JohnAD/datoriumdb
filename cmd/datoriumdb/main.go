@@ -125,9 +125,10 @@ func main() {
 	}
 
 	// Wire replication (tech-docs/REPLICATION-FAILURE-HANDLING.md and
-	// tech-docs/SERVER-TO-SERVER-API.md): SOT-side push-then-pending
-	// delivery, plus a read/proxy-member catch-up loop and durable
-	// SOT-restart recovery for interrupted operations.
+	// tech-docs/SERVER-TO-SERVER-API.md): one-shot live delivery for
+	// create/patch/delete with .pendingWrites only for targets that do
+	// not acknowledge; READ catch-up owns the rest. ResumeIncomplete
+	// still drains any leftover durable .operations records.
 	if tokens != nil {
 		eng.Replicator = &replication.Coordinator{
 			ServerName: serverName,
@@ -250,10 +251,20 @@ func main() {
 }
 
 // runCatchUpLoop implements the read/proxy-member side of
-// tech-docs/REPLICATION-FAILURE-HANDLING.md's "Read-Member Catch-Up": every
-// checkinInterval, check in with each SOT-member this server depends on for
-// at least one shard slot, applying and completing any pending work.
+// tech-docs/REPLICATION-FAILURE-HANDLING.md's "Read-Member Catch-Up": check
+// in immediately on start (so staged creates are not delayed by a full
+// interval), then every checkinInterval with each SOT-member this server
+// depends on for at least one shard slot, applying and completing any
+// pending work.
 func runCatchUpLoop(ctx context.Context, agent *replication.CatchUpAgent, eng *engine.Engine, checkinInterval time.Duration) {
+	checkInAll := func() {
+		for _, sot := range replication.RelevantSOTServers(eng.Cfg, agent.ServerName) {
+			if err := agent.CheckIn(ctx, sot); err != nil {
+				log.Printf("replication check-in with %s failed: %v", sot, err)
+			}
+		}
+	}
+	checkInAll()
 	ticker := time.NewTicker(checkinInterval)
 	defer ticker.Stop()
 	for {
@@ -261,11 +272,7 @@ func runCatchUpLoop(ctx context.Context, agent *replication.CatchUpAgent, eng *e
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		}
-		for _, sot := range replication.RelevantSOTServers(eng.Cfg, agent.ServerName) {
-			if err := agent.CheckIn(ctx, sot); err != nil {
-				log.Printf("replication check-in with %s failed: %v", sot, err)
-			}
+			checkInAll()
 		}
 	}
 }

@@ -27,7 +27,7 @@ func TestComposeSingleNodeCRUD(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "compose-single-node-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseURL, token, `create Movies null {$: Movies:0, title: "Compose Smoke Test"}`)
+	created, err := testutil.PostCommand(ctx, baseURL, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Compose Smoke Test"}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

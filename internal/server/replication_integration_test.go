@@ -110,12 +110,12 @@ func localDocGone(eng *engine.Engine, collection, id string) bool {
 	return os.IsNotExist(err) || err != nil
 }
 
-// --- happy path: create/patch/delete replicate to read + proxy members ----
+// --- happy path: one-shot live delivery for create/patch/delete ----
 
 func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	topo := newReplicationTopology(t)
 
-	created := topo.sot.Execute(`create Movies null {$: Movies:0, title: "The Matrix"}`)
+	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix"}`)
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
@@ -125,7 +125,6 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
-	// Replicated synchronously to both live targets before create returns.
 	readDoc := readLocalDoc(t, topo.read, "Movies", id)
 	if readDoc["title"] != "The Matrix" {
 		t.Fatalf("unexpected read-member copy: %#v", readDoc)
@@ -137,9 +136,12 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	if readDoc["#"] != ver || proxyDoc["#"] != ver {
 		t.Fatalf("expected replicas to share the SOT's version: sot=%v read=%v proxy=%v", ver, readDoc["#"], proxyDoc["#"])
 	}
+	for _, target := range []string{"serverB", "analysisA"} {
+		if _, err := replication.ReadPendingWrite(topo.sot.DataDir, "Movies", target, id); !os.IsNotExist(err) {
+			t.Fatalf("expected no pending write for %s after successful one-shot: err=%v", target, err)
+		}
+	}
 
-	// The read-member itself can now serve the document as a normal
-	// smart-client read target.
 	readResult := topo.read.Execute(`read Movies ` + id + ` {}`)
 	if readResult["ok"] != true {
 		t.Fatalf("expected read-member to serve the replicated document: %#v", readResult)
@@ -148,6 +150,9 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	patched := topo.sot.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: add, path: /status, value: released}]}`)
 	if patched["ok"] != true {
 		t.Fatalf("expected patch to succeed: %#v", patched)
+	}
+	if _, hasNote := patched["note"]; hasNote {
+		t.Fatalf("expected no note when every target acknowledges patch: %#v", patched)
 	}
 	versions, _ := patched["versions"].(map[string]any)
 	afterVer, _ := versions["after"].(string)
@@ -168,23 +173,25 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	if deleted["ok"] != true {
 		t.Fatalf("expected delete to succeed: %#v", deleted)
 	}
+	if _, hasNote := deleted["note"]; hasNote {
+		t.Fatalf("expected no note when every target acknowledges delete: %#v", deleted)
+	}
 	if !localDocGone(topo.read, "Movies", id) {
-		t.Fatalf("expected delete to replicate (soft-delete) on read-member")
+		t.Fatalf("expected one-shot delete on read-member")
 	}
 	if !localDocGone(topo.proxy, "Movies", id) {
-		t.Fatalf("expected delete to replicate (soft-delete) on proxy-member")
+		t.Fatalf("expected one-shot delete on proxy-member")
 	}
 }
 
-// --- down member: SOT still reports ok:true, plus a note, plus a durable
-// pending write that catch-up can later resolve --------------------------
+// --- one-shot with a down read-member: live target acks; down target gets
+// pending + note; no .operations tracking
 
-func TestReplicationDownMemberReturnsOKWithNoteAndPendingWrite(t *testing.T) {
+func TestReplicationOneShotDownMemberPendingAndNote(t *testing.T) {
 	topo := newReplicationTopology(t)
-	// Take the read-member down; the proxy-member stays up.
 	topo.readTS.Close()
 
-	created := topo.sot.Execute(`create Movies null {$: Movies:0, title: "Down Member Test"}`)
+	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Down Member Test"}`)
 	if created["ok"] != true {
 		t.Fatalf("expected SOT-local success even though a read-member is down: %#v", created)
 	}
@@ -192,7 +199,7 @@ func TestReplicationDownMemberReturnsOKWithNoteAndPendingWrite(t *testing.T) {
 
 	note, ok := created["note"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected a note describing the incomplete replication: %#v", created)
+		t.Fatalf("expected a note naming the unacknowledged target: %#v", created)
 	}
 	if note["code"] != replication.NoteCode {
 		t.Fatalf("unexpected note code: %#v", note)
@@ -206,29 +213,26 @@ func TestReplicationDownMemberReturnsOKWithNoteAndPendingWrite(t *testing.T) {
 		t.Fatalf("expected analysisA acknowledged, got %#v", note)
 	}
 
-	// The proxy-member (still up) got it directly.
 	proxyDoc := readLocalDoc(t, topo.proxy, "Movies", id)
 	if proxyDoc["title"] != "Down Member Test" {
-		t.Fatalf("unexpected proxy-member copy: %#v", proxyDoc)
+		t.Fatalf("expected one-shot delivery to the live proxy: %#v", proxyDoc)
+	}
+	if !localDocGone(topo.read, "Movies", id) {
+		t.Fatalf("down read-member must not have received a live create")
 	}
 
-	// A durable pending write exists for serverB.
 	item, err := replication.ReadPendingWrite(topo.sot.DataDir, "Movies", "serverB", id)
 	if err != nil {
 		t.Fatalf("expected a pending write for serverB: %v", err)
 	}
 	if item.Command != "create" || item.ID != id {
-		t.Fatalf("unexpected pending write contents: %#v", item)
+		t.Fatalf("unexpected pending write: %#v", item)
 	}
-
-	// The operation itself is durably recorded as non-terminal (still
-	// replicating), so a restart would resume it.
-	op, err := replication.Load(topo.sot.DataDir, created["operationId"].(string))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := replication.ReadPendingWrite(topo.sot.DataDir, "Movies", "analysisA", id); !os.IsNotExist(err) {
+		t.Fatalf("expected no pending write for the acknowledged proxy: err=%v", err)
 	}
-	if op.State.Terminal() {
-		t.Fatalf("expected a non-terminal operation state while a target is still unacknowledged, got %q", op.State)
+	if _, err := replication.Load(topo.sot.DataDir, created["operationId"].(string)); err == nil {
+		t.Fatalf("expected no durable operation record for create")
 	}
 }
 
@@ -239,7 +243,7 @@ func TestCatchUpAppliesPendingWriteAndCleansUpAfterRestart(t *testing.T) {
 	topo := newReplicationTopology(t)
 	topo.readTS.Close()
 
-	created := topo.sot.Execute(`create Movies null {$: Movies:0, title: "Catch Up Test"}`)
+	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "Catch Up Test"}`)
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}

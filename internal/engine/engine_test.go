@@ -14,7 +14,7 @@ import (
 
 func TestCreateReadPatchDelete(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999, status: released}`)
+	created := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999, status: released}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -69,7 +69,7 @@ func TestCreateBangMismatch(t *testing.T) {
 
 func TestPatchSchemaValidation(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x", status: released}`)
+	created := eng.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "x", status: released}`)
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 	res := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: remove, path: /title}]}`)
@@ -80,7 +80,7 @@ func TestPatchSchemaValidation(t *testing.T) {
 
 func TestConcurrentSameVersionPatch(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x", status: released}`)
+	created := eng.Execute(`create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "x", status: released}`)
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 	var success atomic.Int32
@@ -113,7 +113,7 @@ func TestConcurrentSameVersionPatch(t *testing.T) {
 
 func TestQueueWriteSurfaced(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x"}`)
+	created := eng.Execute(`create Movies 01TESTMOVIES00000000000004 {$: Movies:0, title: "x"}`)
 	if created["ok"] != true {
 		t.Fatalf("%#v", created)
 	}

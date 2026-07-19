@@ -51,7 +51,7 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "great!"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000001 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "great!"}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -83,7 +83,7 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 
 func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__unknownMovie", text: "x"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000002 {$: Reviews:0, movieRef: "@@__Movies__unknownMovie", text: "x"}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -115,7 +115,7 @@ func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 
 func TestReadWithoutCacheSummariesFlagOmitsField(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews null {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "x"}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000003 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "x"}`)
 	id, _ := created["id"].(string)
 	read := eng.Execute(`read Reviews ` + id + ` {}`)
 	if read["ok"] != true {
@@ -165,7 +165,7 @@ func TestReadCacheSummariesFindsNestedCachedRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := eng.Execute(`create Reviews null {$: Reviews:0, text: "x", meta: {movieRef: "@@__Movies__movieNested"}}`)
+	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000004 {$: Reviews:0, text: "x", meta: {movieRef: "@@__Movies__movieNested"}}`)
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}

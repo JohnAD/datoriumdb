@@ -131,7 +131,7 @@ func TestDualRoleServerServesBothReadsAndWrites(t *testing.T) {
 	// both SHARD_SOT_MEMBER and SHARD_READ_MEMBER for 00-FF) must not
 	// need any wrongMachine bounce for either command.
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies null {$: Movies:0, title: "x"}`)
+	created := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "x"}`)
 	if created["ok"] != true {
 		t.Fatalf("expected dual-role create to succeed: %#v", created)
 	}

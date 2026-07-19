@@ -24,13 +24,13 @@ The `<detail>` section is a pseudo-JSON object. It follows JSON-like structure, 
 For example, this:
 
 ```text
-create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
+create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}
 ```
 
 is equivalent to:
 
 ```text
-create Movies null {"$": "Movies:0", "title": "The Matrix", "releaseYear": 1999}
+create Movies 01TESTMOVIES00000000000002 {"$": "Movies:0", "title": "The Matrix", "releaseYear": 1999}
 ```
 
 ## Commands
@@ -60,7 +60,7 @@ Authorization: Bearer {token}
 The request body is exactly one access-language command line:
 
 ```text
-create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
+create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "The Matrix", releaseYear: 1999}
 ```
 
 The response is always HTTP `200` with `Content-Type: application/json` and a DatoriumDB result envelope.
@@ -112,7 +112,7 @@ The four command parts are:
 
 - `create` is the command word.
 - `{collection}` is the target collection.
-- `{id}` is the document ID to create. If `{id}` is `null`, the database automatically creates a ULID.
+- `{id}` is the client-supplied document ID to create. The server never generates create IDs; `null` is rejected. Smart clients should mint a ULID (or other allowed ID) before calling create.
 - `{content}` is the document content to create.
 
 The collection and schema are validated before the document is created:
@@ -121,15 +121,16 @@ The collection and schema are validated before the document is created:
 - The schema/version marker uses `{CollectionName}:{schemaVersion}`. New collections start at schema version `0`, so a new `Movies` document uses `$: Movies:0`.
 - If `{content}` omits `$`, the server fills it with the collection's current schema marker.
 - If `{content}` includes `$`, it must match the collection's current schema marker.
-- Write commands may include a client-supplied `operationId` ULID in the detail object for retry-safe idempotency. If omitted, the server generates one.
+- Create may include a client-supplied `operationId` for correlation. It is echoed in the response when present (or generated when omitted), but create does not keep durable per-operation retry state. Retries with the same document ID receive `documentExists`.
 
 The database owns some document metadata fields:
 
-- The document ID is taken from `{id}`.
-- If `{id}` is `null`, the database automatically creates a ULID.
-- If `{content}` includes an ID in the `!` field, it must match `{id}` unless `{id}` is `null`.
-- If `{content}` omits `!`, the server fills it from the final document ID.
+- The document ID is taken from `{id}` and must be a non-empty, filesystem-safe ID.
+- If `{content}` includes an ID in the `!` field, it must match `{id}`.
+- If `{content}` omits `!`, the server fills it from `{id}`.
 - `{content}` cannot include a `#` version field because document versions are created by the database.
+
+On a sharded deployment, after the SOT commits the document locally it makes one live delivery attempt to each assigned read/proxy member. Targets that acknowledge are done; targets that do not get a `.pendingWrites` entry, after which the SOT stops worrying about them. A response `note` may name unacknowledged targets. Separating SOT and READ so they scale independently means a successful create does not guarantee every READ already has the document — see [SHARDING.md](SHARDING.md).
 
 ### Create Returns
 
@@ -156,7 +157,7 @@ On failure, it returns `ok: false` and an `errors` array:
   ok: false,
   command: create,
   collection: Movies,
-  id: null,
+  id: 01KWD65CFQPEZS7H1WJE4MK990,
   errors: [
     {
       code: schemaMismatch,
@@ -311,7 +312,9 @@ The four command parts are:
 
 The patch details object MUST include the `$` schema/version marker and the `#` document version field at the top level. This prevents blind patches by requiring the caller to confirm both the current schema and the exact version of the document being changed.
 
-Write commands may include a client-supplied `operationId` ULID for retry-safe idempotency. If omitted, the server generates one.
+Patch may include a client-supplied `operationId` for correlation. It is echoed in the response when present (or generated when omitted), but patch does not keep durable per-operation retry state. Retries against the pre-patch `#` version receive `versionMismatch`.
+
+On a sharded deployment, after the SOT commits the patch locally it makes one live delivery attempt to each assigned read/proxy member. Targets that acknowledge are done; targets that do not get a `.pendingWrites` entry. A response `note` may name unacknowledged targets.
 
 The initial patch operation format is based on RFC 6902 JSON Patch. To leave room for additional patch forms later, the RFC 6902 operation array is stored directly under an `RFC6902` field.
 
@@ -391,7 +394,9 @@ The four command parts are:
 
 The confirming details object MUST include the `#` document version field. This prevents blind deletes by requiring the caller to confirm the exact version of the document being removed.
 
-Write commands may include a client-supplied `operationId` ULID for retry-safe idempotency. If omitted, the server generates one.
+Delete may include a client-supplied `operationId` for correlation. It is echoed in the response when present (or generated when omitted), but delete does not keep durable per-operation retry state. Retries after a successful delete receive `documentNotFound`.
+
+On a sharded deployment, after the SOT soft-deletes the document locally it makes one live delivery attempt to each assigned read/proxy member. Targets that acknowledge are done; targets that do not get a `.pendingWrites` entry. A response `note` may name unacknowledged targets. READ members apply deletes idempotently (already-gone is success).
 
 For example:
 
@@ -492,7 +497,7 @@ Search definitions are created and deleted through `datoriumctl`, not through th
 ## Examples
 
 ```text
-create Movies null {$: Movies:0, title: "The Matrix", releaseYear: 1999}
+create Movies 01TESTMOVIES00000000000004 {$: Movies:0, title: "The Matrix", releaseYear: 1999}
 ```
 
 ```text
