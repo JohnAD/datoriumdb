@@ -9,8 +9,8 @@ import (
 
 	"github.com/JohnAD/datoriumdb/internal/auth"
 	"github.com/JohnAD/datoriumdb/internal/config"
-	"github.com/JohnAD/datoriumdb/internal/engine"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
+	"github.com/JohnAD/datoriumdb/internal/engine"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 )
