@@ -3,6 +3,7 @@ package cache
 import (
 	"fmt"
 
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -32,7 +33,11 @@ func Apply(dataDir string, item WorkItem) (applied bool, err error) {
 		// state represented inside the summary... requested SOT summary
 		// fields are omitted."
 		doc := map[string]any{"!": item.SourceDocumentID, "#": nil}
-		if err := fsstore.WriteDocumentJSON(path, doc); err != nil {
+		raw, err := docjson.EncodeMap(doc)
+		if err != nil {
+			return false, err
+		}
+		if err := fsstore.WriteDocumentJSON(path, raw); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -40,7 +45,11 @@ func Apply(dataDir string, item WorkItem) (applied bool, err error) {
 		if item.Payload == nil {
 			return false, fmt.Errorf("cache-agent: %s work item for %s/%s is missing payload", item.Command, item.SourceCollection, item.SourceDocumentID)
 		}
-		if err := fsstore.WriteDocumentJSON(path, item.Payload); err != nil {
+		raw, err := docjson.EncodeMap(item.Payload)
+		if err != nil {
+			return false, err
+		}
+		if err := fsstore.WriteDocumentJSON(path, raw); err != nil {
 			return false, err
 		}
 		return true, nil

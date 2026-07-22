@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -15,7 +16,11 @@ func newTestAgent(dir string, cfg *config.Config) *Agent {
 func seedMovie(t *testing.T, dir, id, version string) {
 	t.Helper()
 	doc := map[string]any{"!": id, "$": "Movies:" + version, "#": "v1", "title": "T"}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", id), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", id), raw); err != nil {
 		t.Fatal(err)
 	}
 }

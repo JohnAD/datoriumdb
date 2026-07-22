@@ -100,7 +100,7 @@ func TestDeliverOnceAcknowledgedTargetLeavesNoPending(t *testing.T) {
 		Tokens:     StaticTokenSource("tok"),
 		Timeout:    2 * time.Second,
 	}
-	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: map[string]any{"!": "doc1"}}
+	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: mustPayload(map[string]any{"!": "doc1"})}
 	outcome := c.DeliverOnce(context.Background(), item, []string{"serverB"})
 	if !outcome.Complete() {
 		t.Fatalf("expected complete outcome, got %#v", outcome)
@@ -118,7 +118,7 @@ func TestStagePendingWritesWritesAllTargets(t *testing.T) {
 		ID:          "doc1",
 		OperationID: "op1",
 		Command:     "create",
-		Payload:     map[string]any{"!": "doc1", "title": "x"},
+		Payload:     mustPayload(map[string]any{"!": "doc1", "title": "x"}),
 	}
 	if err := c.StagePendingWrites(item, []string{"serverB", "analysisA"}); err != nil {
 		t.Fatalf("StagePendingWrites: %v", err)
@@ -146,7 +146,7 @@ func TestReplicateDocumentWriteHappyPath(t *testing.T) {
 		Tokens:     StaticTokenSource("tok"),
 		Timeout:    2 * time.Second,
 	}
-	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: map[string]any{"!": "doc1"}}
+	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: mustPayload(map[string]any{"!": "doc1"})}
 	outcome := c.ReplicateDocumentWrite(context.Background(), item, []string{"serverB"})
 	if !outcome.Complete() {
 		t.Fatalf("expected complete outcome, got %#v", outcome)
@@ -171,7 +171,7 @@ func TestReplicateDocumentWriteDownMemberRecordsPendingWrite(t *testing.T) {
 		Tokens:     StaticTokenSource("tok"),
 		Timeout:    2 * time.Second,
 	}
-	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: map[string]any{"!": "doc1"}}
+	item := DocumentWorkItem{Collection: "Movies", ID: "doc1", OperationID: "op1", Command: "create", Payload: mustPayload(map[string]any{"!": "doc1"})}
 	outcome := c.ReplicateDocumentWrite(context.Background(), item, []string{"serverB"})
 	if outcome.Complete() {
 		t.Fatalf("expected incomplete outcome for a rejecting member, got %#v", outcome)

@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -40,10 +41,19 @@ func ApplyToStoredDocument(dataDir string, cfg *config.Config, collection, id st
 		return false, err
 	}
 	doc["#"] = version
+	var docBytes []byte
+	if schemaRaw, ok := cfg.Schemas[collection]; ok {
+		docBytes, err = docjson.CanonicalizeMap(schemaRaw, doc)
+	} else {
+		docBytes, err = docjson.EncodeMap(doc)
+	}
+	if err != nil {
+		return false, err
+	}
 	if err := fsstore.PreservePreviousIfAbsent(dataDir, collection, id); err != nil {
 		return false, err
 	}
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
+	if err := fsstore.WriteDocumentJSONVerified(path, docBytes); err != nil {
 		return false, err
 	}
 	if err := fsstore.EnqueueChange(dataDir, collection, id, "patch"); err != nil {

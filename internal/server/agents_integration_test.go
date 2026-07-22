@@ -12,6 +12,7 @@ import (
 	"github.com/JohnAD/datoriumdb/internal/auth"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/engine"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 	"github.com/JohnAD/datoriumdb/internal/search"
@@ -236,7 +237,11 @@ func TestCacheAgentRetriesAfterCrashBeforeCompletion(t *testing.T) {
 func writeMovieDoc(t *testing.T, dataDir, id, status string) {
 	t.Helper()
 	doc := map[string]any{"!": id, "$": "Movies:0", "#": "v1", "title": "T", "status": status}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dataDir, "Movies", id), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dataDir, "Movies", id), raw); err != nil {
 		t.Fatal(err)
 	}
 }

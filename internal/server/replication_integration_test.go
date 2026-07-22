@@ -10,6 +10,7 @@ import (
 	"github.com/JohnAD/datoriumdb/internal/auth"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/engine"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 )
@@ -306,7 +307,11 @@ func TestSOTResumeIncompleteReplicatesLeftoverOperations(t *testing.T) {
 	if err := fsstore.EnsureCollectionDir(topo.sot.DataDir, "Movies"); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsstore.WriteDocumentJSONVerified(fsstore.DocumentPath(topo.sot.DataDir, "Movies", "01CRASHTESTDOC00000000001"), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSONVerified(fsstore.DocumentPath(topo.sot.DataDir, "Movies", "01CRASHTESTDOC00000000001"), raw); err != nil {
 		t.Fatal(err)
 	}
 	op, err := replication.Begin(topo.sot.DataDir, replication.DocumentWorkItem{
@@ -315,7 +320,7 @@ func TestSOTResumeIncompleteReplicatesLeftoverOperations(t *testing.T) {
 		AfterVersion: "01CRASHTESTVER00000000001",
 		OperationID:  "01CRASHTESTOPID0000000001",
 		Command:      "create",
-		Payload:      doc,
+		Payload:      raw,
 	})
 	if err != nil {
 		t.Fatal(err)

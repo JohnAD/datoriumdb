@@ -24,8 +24,8 @@ func TestWriteFileAtomicVisible(t *testing.T) {
 func TestWriteDocumentJSONVerified(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.json")
-	doc := map[string]any{"!": "x", "#": "ver1", "title": "t"}
-	if err := WriteDocumentJSONVerified(path, doc); err != nil {
+	raw := []byte(`{"!":"x","#":"ver1","title":"t"}`)
+	if err := WriteDocumentJSONVerified(path, raw); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadDocumentJSON(path)
@@ -43,7 +43,7 @@ func TestPreservePreviousIfAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := DocumentPath(root, "Movies", "abc")
-	if err := WriteDocumentJSON(live, map[string]any{"!": "abc", "#": "1"}); err != nil {
+	if err := WriteDocumentJSON(live, []byte(`{"!":"abc","#":"1"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := PreservePreviousIfAbsent(root, "Movies", "abc"); err != nil {
@@ -57,7 +57,7 @@ func TestPreservePreviousIfAbsent(t *testing.T) {
 		t.Fatalf("live should be gone after preserve rename")
 	}
 	// Recreate live and ensure older previous is kept.
-	if err := WriteDocumentJSON(live, map[string]any{"!": "abc", "#": "2"}); err != nil {
+	if err := WriteDocumentJSON(live, []byte(`{"!":"abc","#":"2"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := PreservePreviousIfAbsent(root, "Movies", "abc"); err != nil {

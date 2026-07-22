@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/ojson"
 )
@@ -239,7 +240,11 @@ func EnsureStub(dataDir, sourceCollection, sourceDocID string) (map[string]any, 
 		return nil, err
 	}
 	path := fsstore.CachePath(dataDir, sourceCollection, sourceDocID)
-	if err := fsstore.WriteDocumentJSON(path, stub); err != nil {
+	raw, err := docjson.EncodeMap(stub)
+	if err != nil {
+		return nil, err
+	}
+	if err := fsstore.WriteDocumentJSON(path, raw); err != nil {
 		return nil, err
 	}
 	return stub, nil

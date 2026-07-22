@@ -15,7 +15,7 @@ func TestApplierCreateIsIdempotent(t *testing.T) {
 		AfterVersion: "v1",
 		OperationID:  "op1",
 		Command:      "create",
-		Payload:      map[string]any{"!": "doc1", "$": "Movies:0", "#": "v1", "title": "The Matrix"},
+		Payload:      mustPayload(map[string]any{"!": "doc1", "$": "Movies:0", "#": "v1", "title": "The Matrix"}),
 	}
 	applied, err := applier.Apply(item)
 	if err != nil || !applied {
@@ -42,14 +42,14 @@ func TestApplierCreateConflictOnDifferentVersion(t *testing.T) {
 	applier := &Applier{DataDir: dir}
 	first := DocumentWorkItem{
 		Collection: "Movies", ID: "doc1", AfterVersion: "v1", OperationID: "op1", Command: "create",
-		Payload: map[string]any{"!": "doc1", "#": "v1"},
+		Payload: mustPayload(map[string]any{"!": "doc1", "#": "v1"}),
 	}
 	if _, err := applier.Apply(first); err != nil {
 		t.Fatal(err)
 	}
 	second := DocumentWorkItem{
 		Collection: "Movies", ID: "doc1", AfterVersion: "v2", OperationID: "op2", Command: "create",
-		Payload: map[string]any{"!": "doc1", "#": "v2"},
+		Payload: mustPayload(map[string]any{"!": "doc1", "#": "v2"}),
 	}
 	if _, err := applier.Apply(second); err == nil {
 		t.Fatalf("expected a conflict error for a differently-versioned create of the same document")
@@ -61,7 +61,7 @@ func TestApplierPatchAppliesOpsAndBumpsVersion(t *testing.T) {
 	applier := &Applier{DataDir: dir}
 	create := DocumentWorkItem{
 		Collection: "Movies", ID: "doc1", AfterVersion: "v1", OperationID: "op1", Command: "create",
-		Payload: map[string]any{"!": "doc1", "$": "Movies:0", "#": "v1", "status": "unreleased"},
+		Payload: mustPayload(map[string]any{"!": "doc1", "$": "Movies:0", "#": "v1", "status": "unreleased"}),
 	}
 	if _, err := applier.Apply(create); err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestApplierDeleteIsIdempotent(t *testing.T) {
 	applier := &Applier{DataDir: dir}
 	create := DocumentWorkItem{
 		Collection: "Movies", ID: "doc1", AfterVersion: "v1", OperationID: "op1", Command: "create",
-		Payload: map[string]any{"!": "doc1", "#": "v1"},
+		Payload: mustPayload(map[string]any{"!": "doc1", "#": "v1"}),
 	}
 	if _, err := applier.Apply(create); err != nil {
 		t.Fatal(err)

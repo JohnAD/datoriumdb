@@ -26,7 +26,9 @@ type DocumentWorkItem struct {
 	OperationID   string           `json:"operationId"`
 	Command       string           `json:"command"`
 	Patch         []map[string]any `json:"patch,omitempty"`
-	Payload       map[string]any   `json:"payload,omitempty"`
+	// Payload is the full ordered document JSON for create (and for patch
+	// catch-up so READ members do not rebuild documents through Go maps).
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // PendingWritesDir returns {dataDir}/{collection}/.pendingWrites.

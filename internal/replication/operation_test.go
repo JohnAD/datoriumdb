@@ -14,7 +14,7 @@ func TestOperationStateTransitions(t *testing.T) {
 		AfterVersion: "01VER0000000000000000000A",
 		OperationID:  "01OP00000000000000000000A",
 		Command:      "create",
-		Payload:      map[string]any{"!": "01DOC0000000000000000000A"},
+		Payload:      mustPayload(map[string]any{"!": "01DOC0000000000000000000A"}),
 	}
 	op, err := Begin(dir, item)
 	if err != nil {
