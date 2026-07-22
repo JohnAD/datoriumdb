@@ -6,13 +6,36 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/JohnAD/ojson"
 )
+
+// ParseDetailStrictJSON converts a pseudo-JSON detail object to strict JSON
+// text, preserving object field order from the source text.
+func ParseDetailStrictJSON(detail string) (string, error) {
+	detail = strings.TrimSpace(detail)
+	return pseudoToStrictJSON(detail)
+}
+
+// ParseDetailValue parses a pseudo-JSON detail object with OJSON so object
+// field order is preserved for later canonical document writes.
+func ParseDetailValue(detail string) (ojson.JSONValue, error) {
+	strict, err := ParseDetailStrictJSON(detail)
+	if err != nil {
+		return ojson.NewVoid(), err
+	}
+	doc, err := ojson.ReadBytesNoSchema([]byte(strict))
+	if err != nil {
+		return ojson.NewVoid(), fmt.Errorf("invalid detail object: %w", err)
+	}
+	return doc, nil
+}
 
 // ParseDetail parses a pseudo-JSON detail object into a generic map.
 // Quotes are optional for keys and string values that do not contain spaces.
+// Prefer ParseDetailValue when field order must be preserved through storage.
 func ParseDetail(detail string) (map[string]any, error) {
-	detail = strings.TrimSpace(detail)
-	strict, err := pseudoToStrictJSON(detail)
+	strict, err := ParseDetailStrictJSON(detail)
 	if err != nil {
 		return nil, err
 	}

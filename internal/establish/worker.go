@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/ojson"
 )
@@ -387,27 +388,40 @@ func parseEstablishResponse(body []byte) (*establishResponse, error) {
 	doc.ShardMap = rawJSONField(root, "shardMap")
 	doc.Auth = rawJSONField(root, "auth")
 
-	for _, field := range root.Get("schemas").ObjectFields() {
-		entryObj := field.Value
+	schemaKeys, err := docjson.ObjectFieldKeys(root.Get("schemas"))
+	if err != nil {
+		return nil, fmt.Errorf("schemas: %w", err)
+	}
+	for _, key := range schemaKeys {
+		entryObj := root.Get("schemas").Get(key)
 		ver, err := entryObj.Get("version").ToIntTry()
 		if err != nil {
-			return nil, fmt.Errorf("schemas.%s.version: %w", field.Key, err)
+			return nil, fmt.Errorf("schemas.%s.version: %w", key, err)
 		}
 		schemaVal := entryObj.Get("schema")
 		if schemaVal.IsVoid() || schemaVal.IsMissing() {
-			return nil, fmt.Errorf("schemas.%s.schema is required", field.Key)
+			return nil, fmt.Errorf("schemas.%s.schema is required", key)
 		}
-		doc.Schemas[field.Key] = schemaEntry{
+		doc.Schemas[key] = schemaEntry{
 			Version: ver,
 			Schema:  json.RawMessage(schemaVal.ToJSONBytes()),
 		}
 	}
-	for _, coll := range root.Get("searches").ObjectFields() {
+	searchCollKeys, err := docjson.ObjectFieldKeys(root.Get("searches"))
+	if err != nil {
+		return nil, fmt.Errorf("searches: %w", err)
+	}
+	for _, collKey := range searchCollKeys {
+		coll := root.Get("searches").Get(collKey)
 		inner := map[string]json.RawMessage{}
-		for _, search := range coll.Value.ObjectFields() {
-			inner[search.Key] = json.RawMessage(search.Value.ToJSONBytes())
+		searchKeys, err := docjson.ObjectFieldKeys(coll)
+		if err != nil {
+			return nil, fmt.Errorf("searches.%s: %w", collKey, err)
 		}
-		doc.Searches[coll.Key] = inner
+		for _, searchKey := range searchKeys {
+			inner[searchKey] = json.RawMessage(coll.Get(searchKey).ToJSONBytes())
+		}
+		doc.Searches[collKey] = inner
 	}
 	return doc, nil
 }

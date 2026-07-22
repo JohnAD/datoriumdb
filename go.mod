@@ -3,7 +3,7 @@ module github.com/JohnAD/datoriumdb
 go 1.25.11
 
 require (
-	github.com/JohnAD/ojson v0.0.0
+	github.com/JohnAD/ojson v1.0.0
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/oklog/ulid/v2 v2.1.1
 )
@@ -22,5 +22,3 @@ require (
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 )
-
-replace github.com/JohnAD/ojson => ./third_party/ojson

@@ -10,11 +10,11 @@ import (
 
 	"github.com/JohnAD/datoriumdb/internal/accesslang"
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/idgen"
 	"github.com/JohnAD/datoriumdb/internal/replication"
-	"github.com/JohnAD/datoriumdb/internal/rfc6902"
 	"github.com/JohnAD/datoriumdb/internal/shard"
 	"github.com/JohnAD/ojson"
 )
@@ -187,13 +187,12 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 			Message: err.Error(),
 		})
 	}
-	doc := map[string]any{
-		"!": id,
-		"$": marker,
-		"#": version,
-	}
-	for k, v := range content {
-		doc[k] = v
+	docBytes, err := canonicalCreateDocument(schemaRaw, cmd.Detail, id, marker, version)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentEncodeFailed",
+			Message: err.Error(),
+		})
 	}
 	path := fsstore.DocumentPath(e.DataDir, collection, id)
 	item := replication.DocumentWorkItem{
@@ -202,7 +201,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 		AfterVersion: version,
 		OperationID:  opID,
 		Command:      "create",
-		Payload:      doc,
+		Payload:      docBytes,
 	}
 
 	e.mu.Lock()
@@ -222,7 +221,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 	}
 	// Local SOT commit under the lock; one-shot delivery runs after unlock
 	// so network timeouts never hold the engine mutex.
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
+	if err := fsstore.WriteDocumentJSONVerified(path, docBytes); err != nil {
 		e.mu.Unlock()
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
 			Code:    "filesystemError",
@@ -322,7 +321,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			e.mu.Unlock()
 		}
 	}()
-	doc, err := fsstore.ReadDocumentJSON(path)
+	doc, err := fsstore.ReadDocumentValue(path)
 	if err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "documentNotFound",
@@ -330,7 +329,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 		})
 	}
 	expectedVer, _ := detail["#"].(string)
-	actualVer, _ := doc["#"].(string)
+	actualVer := doc.Get("#").ToStringOrEmpty()
 	if expectedVer == "" || expectedVer != actualVer {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:     "versionMismatch",
@@ -350,7 +349,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Actual:   v,
 		})
 	}
-	if bang, _ := doc["!"].(string); bang != id {
+	if bang := doc.Get("!").ToStringOrEmpty(); bang != id {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:     "idMismatch",
 			Path:     "/!",
@@ -359,35 +358,49 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Actual:   bang,
 		})
 	}
-	ops, ok := detail["RFC6902"].([]any)
-	if !ok {
+	detailValue, err := accesslang.ParseDetailValue(cmd.Detail)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "invalidDetail",
+			Message: err.Error(),
+		})
+	}
+	rfcVal := detailValue.Get("RFC6902")
+	if !rfcVal.IsArray() {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidPatch",
 			Message: "RFC6902 array is required",
 		})
 	}
-	replicatedOps := make([]map[string]any, 0, len(ops)+1)
-	for _, raw := range ops {
-		op, _ := raw.(map[string]any)
-		p, _ := op["path"].(string)
-		from, _ := op["from"].(string)
-		if restrictedPointer(p) || restrictedPointer(from) {
+	patch, err := ojson.PatchFromJSONValue(rfcVal)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "invalidPatch",
+			Message: err.Error(),
+		})
+	}
+	for _, op := range patch.Ops() {
+		if restrictedPointer(op.Path()) || restrictedPointer(op.From()) {
 			return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 				Code:    "invalidPatchPath",
-				Path:    p,
+				Path:    op.Path(),
 				Message: "cannot patch database-owned metadata",
 			})
 		}
-		if err := rfc6902.Apply(doc, op); err != nil {
-			return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
-				Code:    "invalidPatch",
-				Message: err.Error(),
-			})
-		}
-		replicatedOps = append(replicatedOps, op)
 	}
-	content := stripWriteMeta(doc)
-	if err := validateAgainstSchema(schemaRaw, content); err != nil {
+	patched, err := ojson.ApplyPatch(doc, patch)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "invalidPatch",
+			Message: err.Error(),
+		})
+	}
+	content := patched.Clone()
+	content.Remove("!")
+	content.Remove("$")
+	content.Remove("#")
+	content.Remove("operationId")
+	if err := validateValueAgainstSchema(schemaRaw, content); err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidSchema",
 			Message: err.Error(),
@@ -400,13 +413,35 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Message: err.Error(),
 		})
 	}
-	doc["#"] = after
-	doc["!"] = id
-	doc["$"] = marker
-	delete(doc, "operationId")
+	if err := patched.SetTry("!", ojson.NewString(id)); err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentEncodeFailed",
+			Message: err.Error(),
+		})
+	}
+	if err := patched.SetTry("$", ojson.NewString(marker)); err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentEncodeFailed",
+			Message: err.Error(),
+		})
+	}
+	if err := patched.SetTry("#", ojson.NewString(after)); err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentEncodeFailed",
+			Message: err.Error(),
+		})
+	}
+	patched.Remove("operationId")
 	// Unlike user-submitted patches, SOT-authored replication patches may
 	// update database-owned metadata: every read/proxy member must land on
 	// the same "/#" version (SERVER-TO-SERVER-API.md).
+	replicatedOps, err := patchOpsToMaps(patch)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "invalidPatch",
+			Message: err.Error(),
+		})
+	}
 	replicatedOps = append(replicatedOps, map[string]any{"op": "replace", "path": "/#", "value": after})
 	if opID == "" {
 		opID, err = e.ids().New()
@@ -417,6 +452,13 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			})
 		}
 	}
+	docBytes, err := docjson.Canonicalize(schemaRaw, patched)
+	if err != nil {
+		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
+			Code:    "documentEncodeFailed",
+			Message: err.Error(),
+		})
+	}
 	item := replication.DocumentWorkItem{
 		Collection:    collection,
 		ID:            id,
@@ -425,6 +467,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 		OperationID:   opID,
 		Command:       "patch",
 		Patch:         replicatedOps,
+		Payload:       docBytes,
 	}
 	if err := fsstore.PreservePreviousIfAbsent(e.DataDir, collection, id); err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
@@ -432,7 +475,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Message: err.Error(),
 		})
 	}
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
+	if err := fsstore.WriteDocumentJSONVerified(path, docBytes); err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "filesystemError",
 			Message: err.Error(),
@@ -742,13 +785,6 @@ func schemaFieldNames(schemaRaw json.RawMessage) map[string]bool {
 }
 
 func validateAgainstSchema(schemaRaw []byte, doc map[string]any) error {
-	schema, err := config.CompileSchemaBytes(schemaRaw)
-	if err != nil {
-		return err
-	}
-	if schema.Kind() != ojson.KindObject {
-		return fmt.Errorf("collection schema root must be object")
-	}
 	b, err := json.Marshal(doc)
 	if err != nil {
 		return err
@@ -757,5 +793,29 @@ func validateAgainstSchema(schemaRaw []byte, doc map[string]any) error {
 	if err != nil {
 		return err
 	}
+	return validateValueAgainstSchema(schemaRaw, value)
+}
+
+func validateValueAgainstSchema(schemaRaw []byte, value ojson.JSONValue) error {
+	schema, err := config.CompileSchemaBytes(schemaRaw)
+	if err != nil {
+		return err
+	}
+	if schema.Kind() != ojson.KindObject {
+		return fmt.Errorf("collection schema root must be object")
+	}
 	return schema.Validate(value)
+}
+
+func patchOpsToMaps(patch ojson.Patch) ([]map[string]any, error) {
+	arr := patch.ToJSONValue()
+	out := make([]map[string]any, 0, arr.Len())
+	for i := 0; i < arr.Len(); i++ {
+		m, err := arr.At(i).ToMapTry()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }

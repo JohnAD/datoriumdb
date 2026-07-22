@@ -1,8 +1,10 @@
 // Package rfc6902 applies a small, dependency-free subset of RFC 6902 JSON
-// Patch operations to decoded document maps. It is shared by
-// internal/engine (user-submitted patches) and internal/replication
-// (SOT-authored replication patches applied by read/proxy members), so both
-// see identical patch semantics.
+// Patch operations to decoded document maps.
+//
+// Production create/patch/delete paths use github.com/JohnAD/ojson's
+// ApplyPatch so ordered documents stay ordered. This package remains for
+// focused map-based unit tests and any callers that intentionally work on
+// unordered Go maps.
 package rfc6902
 
 import (

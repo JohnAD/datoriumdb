@@ -1,11 +1,13 @@
 package fsstore
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/JohnAD/datoriumdb/internal/docjson"
+	"github.com/JohnAD/ojson"
 )
 
 // CollectionDir returns {dataDir}/{collection}.
@@ -55,27 +57,53 @@ func SafeID(id string) bool {
 	return true
 }
 
-// WriteDocumentJSON writes a document object as pretty JSON.
-func WriteDocumentJSON(path string, doc map[string]any) error {
-	data, err := json.MarshalIndent(doc, "", "  ")
+// WriteDocumentJSON writes ordered document JSON bytes via OJSON pretty-print.
+// Callers must supply already-ordered JSON (typically from docjson.Canonicalize).
+// Do not build collection documents with encoding/json and map[string]any —
+// Go map iteration randomizes field order.
+func WriteDocumentJSON(path string, raw []byte) error {
+	pretty, err := docjson.PrettyBytes(raw)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	return WriteFileAtomic(path, data, 0o644)
+	return WriteFileAtomic(path, pretty, 0o644)
 }
 
-// ReadDocumentJSON reads a document object from path.
-func ReadDocumentJSON(path string) (map[string]any, error) {
+// ReadDocumentBytes returns the raw document file contents.
+func ReadDocumentBytes(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+// ReadDocumentValue parses a document file with OJSON, preserving field order.
+func ReadDocumentValue(path string) (ojson.JSONValue, error) {
 	data, err := os.ReadFile(path)
+	if err != nil {
+		return ojson.NewVoid(), err
+	}
+	doc, err := ojson.ReadBytesNoSchema(data)
+	if err != nil {
+		return ojson.NewVoid(), fmt.Errorf("invalid document JSON %s: %w", path, err)
+	}
+	return doc, nil
+}
+
+// ReadDocumentJSON reads a document into a Go map for in-memory command
+// processing. Field order is not preserved in the map (Go maps are
+// unordered); on-disk order is owned by WriteDocumentJSON / docjson.
+func ReadDocumentJSON(path string) (map[string]any, error) {
+	doc, err := ReadDocumentValue(path)
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil {
+	m, err := doc.ToMapTry()
+	if err != nil {
 		return nil, fmt.Errorf("invalid document JSON %s: %w", path, err)
 	}
-	return doc, nil
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out, nil
 }
 
 // PreservePreviousIfAbsent renames live document to .{id}.json only when that

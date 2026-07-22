@@ -1,10 +1,11 @@
 package replication
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
-	"github.com/JohnAD/datoriumdb/internal/rfc6902"
+	"github.com/JohnAD/ojson"
 )
 
 // Applier applies replicated document write work items to local
@@ -41,7 +42,7 @@ func (a *Applier) applyCreate(item DocumentWorkItem) (bool, error) {
 		}
 		return false, fmt.Errorf("replication: create conflict for %s/%s: local version differs from replicated version", item.Collection, item.ID)
 	}
-	if item.Payload == nil {
+	if len(item.Payload) == 0 {
 		return false, fmt.Errorf("replication: create work item for %s/%s is missing payload", item.Collection, item.ID)
 	}
 	if err := fsstore.EnsureCollectionDir(a.DataDir, item.Collection); err != nil {
@@ -55,22 +56,41 @@ func (a *Applier) applyCreate(item DocumentWorkItem) (bool, error) {
 
 func (a *Applier) applyPatch(item DocumentWorkItem) (bool, error) {
 	path := fsstore.DocumentPath(a.DataDir, item.Collection, item.ID)
-	doc, err := fsstore.ReadDocumentJSON(path)
+	doc, err := fsstore.ReadDocumentValue(path)
 	if err != nil {
 		return false, fmt.Errorf("replication: patch target %s/%s not found locally: %w", item.Collection, item.ID, err)
 	}
-	if ver, _ := doc["#"].(string); ver == item.AfterVersion {
+	if ver := doc.Get("#").ToStringOrEmpty(); ver == item.AfterVersion {
 		return true, nil // already applied
 	}
 	if err := fsstore.PreservePreviousIfAbsent(a.DataDir, item.Collection, item.ID); err != nil {
 		return false, err
 	}
-	for _, op := range item.Patch {
-		if err := rfc6902.Apply(doc, op); err != nil {
-			return false, fmt.Errorf("replication: apply patch op to %s/%s: %w", item.Collection, item.ID, err)
+	// Prefer the SOT's ordered full-document payload so READ storage does
+	// not rebuild JSON through unordered Go maps.
+	if len(item.Payload) > 0 {
+		if err := fsstore.WriteDocumentJSONVerified(path, item.Payload); err != nil {
+			return false, err
 		}
+		return true, nil
 	}
-	if err := fsstore.WriteDocumentJSONVerified(path, doc); err != nil {
+	raw, err := json.Marshal(item.Patch)
+	if err != nil {
+		return false, fmt.Errorf("replication: encode patch for %s/%s: %w", item.Collection, item.ID, err)
+	}
+	patch, err := ojson.ReadPatchBytes(raw)
+	if err != nil {
+		return false, fmt.Errorf("replication: parse patch for %s/%s: %w", item.Collection, item.ID, err)
+	}
+	patched, err := ojson.ApplyPatch(doc, patch)
+	if err != nil {
+		return false, fmt.Errorf("replication: apply patch op to %s/%s: %w", item.Collection, item.ID, err)
+	}
+	pretty := patched.ToPrettyJSONBytes(2)
+	if len(pretty) == 0 || pretty[len(pretty)-1] != '\n' {
+		pretty = append(pretty, '\n')
+	}
+	if err := fsstore.WriteDocumentJSONVerified(path, pretty); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -28,7 +29,11 @@ func testUpgradeConfig() *config.Config {
 func TestApplyToStoredDocumentMigratesAndEnqueues(t *testing.T) {
 	dir := t.TempDir()
 	doc := map[string]any{"!": "id1", "$": "Movies:0", "#": "v1", "title": "T"}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", "id1"), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", "id1"), raw); err != nil {
 		t.Fatalf("seed document: %v", err)
 	}
 	ids := &fakeIDGen{}
@@ -67,7 +72,11 @@ func TestApplyToStoredDocumentMigratesAndEnqueues(t *testing.T) {
 func TestApplyToStoredDocumentNoopWhenCurrent(t *testing.T) {
 	dir := t.TempDir()
 	doc := map[string]any{"!": "id1", "$": "Movies:1", "#": "v1", "title": "T"}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", "id1"), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(dir, "Movies", "id1"), raw); err != nil {
 		t.Fatalf("seed document: %v", err)
 	}
 	changed, err := ApplyToStoredDocument(dir, testUpgradeConfig(), "Movies", "id1", &fakeIDGen{})

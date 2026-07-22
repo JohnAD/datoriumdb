@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/JohnAD/ojson"
 )
 
 // WriteFileAtomic writes data to path using a same-directory temp file and rename.
@@ -50,23 +52,36 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// VerifyDocumentVersion reads path and checks that doc["#"] equals expected.
+// VerifyDocumentVersion reads path with OJSON and checks that "#" equals expected.
 func VerifyDocumentVersion(path, expected string) error {
-	doc, err := ReadDocumentJSON(path)
+	doc, err := ReadDocumentValue(path)
 	if err != nil {
 		return err
 	}
-	actual, _ := doc["#"].(string)
+	actual := doc.Get("#").String()
 	if actual != expected {
 		return fmt.Errorf("version mismatch after write: expected %s actual %s", expected, actual)
 	}
 	return nil
 }
 
-// WriteDocumentJSONVerified atomically writes doc and retries brief verification of "#".
-func WriteDocumentJSONVerified(path string, doc map[string]any) error {
-	version, _ := doc["#"].(string)
-	if err := WriteDocumentJSON(path, doc); err != nil {
+// documentVersion extracts the "#" string from ordered document JSON bytes.
+func documentVersion(raw []byte) (string, error) {
+	doc, err := ojson.ReadBytesNoSchema(raw)
+	if err != nil {
+		return "", err
+	}
+	return doc.Get("#").String(), nil
+}
+
+// WriteDocumentJSONVerified atomically writes ordered document JSON bytes
+// and retries brief verification of "#".
+func WriteDocumentJSONVerified(path string, raw []byte) error {
+	version, err := documentVersion(raw)
+	if err != nil {
+		return err
+	}
+	if err := WriteDocumentJSON(path, raw); err != nil {
 		return err
 	}
 	if version == "" {

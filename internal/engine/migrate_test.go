@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -47,7 +48,11 @@ func testEngineWithSchemaUpgrade(t *testing.T) *Engine {
 func TestReadMigratesStaleDocumentOnAccess(t *testing.T) {
 	eng := testEngineWithSchemaUpgrade(t)
 	doc := map[string]any{"!": "id1", "$": "Movies:0", "#": "v1", "title": "T"}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(eng.DataDir, "Movies", "id1"), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(eng.DataDir, "Movies", "id1"), raw); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +98,11 @@ func TestReadMigratesStaleDocumentOnAccess(t *testing.T) {
 func TestReadDoesNotMigrateAlreadyCurrentDocument(t *testing.T) {
 	eng := testEngineWithSchemaUpgrade(t)
 	doc := map[string]any{"!": "id1", "$": "Movies:1", "#": "v1", "title": "T", "genre": "scifi"}
-	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(eng.DataDir, "Movies", "id1"), doc); err != nil {
+	raw, encErr := docjson.EncodeMap(doc)
+	if encErr != nil {
+		t.Fatal(encErr)
+	}
+	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(eng.DataDir, "Movies", "id1"), raw); err != nil {
 		t.Fatal(err)
 	}
 	read := eng.Execute(`read Movies id1 {}`)
