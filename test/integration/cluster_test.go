@@ -17,7 +17,7 @@ import (
 // ESTABLISHMENT-CONFIG.md), creates stage .pendingWrites on the SOT and
 // the read-member catch-up applies them (REPLICATION-FAILURE-HANDLING.md),
 // reads route only to the assigned SHARD_READ_MEMBER, and writes sent to a
-// non-SOT server are refused with a wrongMachine hint (SHARDING.md).
+// non-SOT server are refused with wrongMachine (SHARDING.md).
 func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	bin := testutil.BuildBinary(t, "datoriumdb")
 	topo := newTwoNodeTopology(t)
@@ -65,8 +65,9 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 		t.Fatalf("expected read from serverB to succeed: %#v", readFromB)
 	}
 
-	// Writes sent to serverB (not the SOT) are refused with a
-	// wrongMachine hint pointing back at serverA.
+	// Writes sent to serverB (not the SOT) are refused with wrongMachine.
+	// Clients must refresh establishment and re-route locally; the bounce
+	// does not include retry-target hints.
 	wrongMachine, err := testutil.PostCommand(ctx, srvB.BaseURL, token, `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Should Not Land Here"}`)
 	if err != nil {
 		t.Fatalf("create on read-member: %v", err)
@@ -74,8 +75,21 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	if wrongMachine["ok"] != false {
 		t.Fatalf("expected write on read-member to be refused: %#v", wrongMachine)
 	}
-	if wrongMachine["correctServer"] != "serverA" {
-		t.Fatalf("expected wrongMachine hint to name serverA: %#v", wrongMachine)
+	errs, _ := wrongMachine["errors"].([]any)
+	if len(errs) == 0 {
+		t.Fatalf("expected wrongMachine errors: %#v", wrongMachine)
+	}
+	err0, _ := errs[0].(map[string]any)
+	if err0["code"] != "wrongMachine" {
+		t.Fatalf("expected wrongMachine error code, got %#v", wrongMachine)
+	}
+	for _, banned := range []string{"correctServer", "baseURL", "shardSlot"} {
+		if _, ok := wrongMachine[banned]; ok {
+			t.Fatalf("wrongMachine must not include %q: %#v", banned, wrongMachine)
+		}
+	}
+	if _, ok := wrongMachine["configVersion"]; !ok {
+		t.Fatalf("expected diagnostic configVersion on wrongMachine: %#v", wrongMachine)
 	}
 
 	_ = srvA

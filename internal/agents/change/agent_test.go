@@ -16,7 +16,8 @@ const moviesSchema = `{
   "kind": "object",
   "children": [
     {"name": "title", "kind": "string", "required": true},
-    {"name": "status", "kind": "string"}
+    {"name": "status", "kind": "string"},
+    {"name": "tags", "kind": "array", "items": {"kind": "string"}}
   ]
 }`
 
@@ -39,6 +40,17 @@ const byStatusSearch = `{
   }
 }`
 
+const byTagSearch = `{
+  "$": "SearchDefinition:v1",
+  "collection": "Movies",
+  "name": "byTag",
+  "version": 1,
+  "v1": {
+    "clauses": [{"field": "/tags", "op": "contains", "value": "$tag"}],
+    "sort": [{"field": "/!", "dir": "asc"}]
+  }
+}`
+
 func testConfig(withCache bool) *config.Config {
 	cfg := &config.Config{
 		General: config.General{General: config.GeneralBody{Version: 1}},
@@ -55,7 +67,10 @@ func testConfig(withCache bool) *config.Config {
 			"Movies": json.RawMessage(moviesSchema),
 		},
 		Searches: map[string]map[string]json.RawMessage{
-			"Movies": {"byStatus": json.RawMessage(byStatusSearch)},
+			"Movies": {
+				"byStatus": json.RawMessage(byStatusSearch),
+				"byTag":    json.RawMessage(byTagSearch),
+			},
 		},
 	}
 	if withCache {
@@ -76,7 +91,15 @@ func newTestAgent(t *testing.T, dataDir string, cfg *config.Config) *Agent {
 
 func writeMovie(t *testing.T, dataDir, id, status string) {
 	t.Helper()
+	writeMovieWithTags(t, dataDir, id, status, nil)
+}
+
+func writeMovieWithTags(t *testing.T, dataDir, id, status string, tags []any) {
+	t.Helper()
 	doc := map[string]any{"!": id, "$": "Movies:0", "#": "v1", "title": "T", "status": status}
+	if tags != nil {
+		doc["tags"] = tags
+	}
 	raw, encErr := docjson.EncodeMap(doc)
 	if encErr != nil {
 		t.Fatal(encErr)
@@ -194,6 +217,50 @@ func TestChangeAgentPatchMovesBucket(t *testing.T) {
 	// The previous-document dotfile must be cleaned up.
 	if _, err := os.Stat(fsstore.PreviousDocumentPath(dataDir, "Movies", "id1")); !os.IsNotExist(err) {
 		t.Fatalf("expected the previous-document dotfile to be removed, stat err=%v", err)
+	}
+}
+
+func TestChangeAgentContainsMultiBucketMembership(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := testConfig(false)
+	agent := newTestAgent(t, dataDir, cfg)
+
+	writeMovieWithTags(t, dataDir, "id1", "released", []any{"all", "todo"})
+	if err := fsstore.EnqueueChange(dataDir, "Movies", "id1", "create"); err != nil {
+		t.Fatalf("enqueue create: %v", err)
+	}
+	if _, err := agent.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce (create): %v", err)
+	}
+	allSegs := []string{search.EncodeStringValue("all")}
+	todoSegs := []string{search.EncodeStringValue("todo")}
+	if rf := readMatches(t, dataDir, "Movies", "byTag", allSegs); !bucketHasID(rf, "id1") {
+		t.Fatalf("expected id1 in the all contains-bucket after create")
+	}
+	if rf := readMatches(t, dataDir, "Movies", "byTag", todoSegs); !bucketHasID(rf, "id1") {
+		t.Fatalf("expected id1 in the todo contains-bucket after create")
+	}
+
+	if err := fsstore.PreservePreviousIfAbsent(dataDir, "Movies", "id1"); err != nil {
+		t.Fatalf("preserve previous: %v", err)
+	}
+	writeMovieWithTags(t, dataDir, "id1", "released", []any{"all", "done"})
+	if err := fsstore.EnqueueChange(dataDir, "Movies", "id1", "patch"); err != nil {
+		t.Fatalf("enqueue patch: %v", err)
+	}
+	if _, err := agent.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce (patch): %v", err)
+	}
+
+	if rf := readMatches(t, dataDir, "Movies", "byTag", todoSegs); bucketHasID(rf, "id1") {
+		t.Fatalf("expected id1 removed from todo contains-bucket after membership change")
+	}
+	doneSegs := []string{search.EncodeStringValue("done")}
+	if rf := readMatches(t, dataDir, "Movies", "byTag", doneSegs); !bucketHasID(rf, "id1") {
+		t.Fatalf("expected id1 in the done contains-bucket after patch")
+	}
+	if rf := readMatches(t, dataDir, "Movies", "byTag", allSegs); !bucketHasID(rf, "id1") {
+		t.Fatalf("expected id1 to remain in the all contains-bucket")
 	}
 }
 

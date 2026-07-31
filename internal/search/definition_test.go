@@ -16,7 +16,9 @@ const testMoviesSchema = `{
     {"name": "status", "kind": "string"},
     {"name": "genre", "kind": "string"},
     {"name": "highRated", "kind": "boolean", "default": false},
-    {"name": "retiredAt", "kind": "string", "nullable": true}
+    {"name": "retiredAt", "kind": "string", "nullable": true},
+    {"name": "tags", "kind": "array", "items": {"kind": "string"}},
+    {"name": "ratings", "kind": "array", "items": {"kind": "number"}}
   ]
 }`
 
@@ -179,6 +181,31 @@ func TestValidateRejectsUnsupportedV1Ops(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected unsupportedInMVP error code, got %+v", errs)
+	}
+}
+
+func TestValidateContainsVariants(t *testing.T) {
+	root := compiledRoot(t)
+	cols := existingCollections()
+	ok := defJSON(t, `{"$":"SearchDefinition:v1","collection":"Movies","name":"n","version":1,
+		"v1":{"clauses":[{"field":"/tags","op":"contains","value":"$tag"}],"sort":[]}}`)
+	if errs := ok.Validate(root, cols); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	okTruth := defJSON(t, `{"$":"SearchDefinition:v1","collection":"Movies","name":"n","version":1,
+		"v1":{"clauses":[{"field":"/tags","op":"contains","value":"urgent","truth":"$hasUrgent"}],"sort":[]}}`)
+	if errs := okTruth.Validate(root, cols); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %+v", errs)
+	}
+	badField := defJSON(t, `{"$":"SearchDefinition:v1","collection":"Movies","name":"n","version":1,
+		"v1":{"clauses":[{"field":"/genre","op":"contains","value":"$tag"}],"sort":[]}}`)
+	if errs := badField.Validate(root, cols); len(errs) == 0 {
+		t.Fatalf("expected contains on non-array field to fail")
+	}
+	missingTruth := defJSON(t, `{"$":"SearchDefinition:v1","collection":"Movies","name":"n","version":1,
+		"v1":{"clauses":[{"field":"/tags","op":"contains","value":"urgent"}],"sort":[]}}`)
+	if errs := missingTruth.Validate(root, cols); len(errs) == 0 {
+		t.Fatalf("expected constant contains without truth to fail")
 	}
 }
 

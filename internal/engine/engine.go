@@ -613,17 +613,13 @@ func (e *Engine) checkRouting(id, command, collection string) *envelope.Result {
 		if assignment.ShardSOTMember == e.ServerName {
 			return nil
 		}
-		return wrongMachineResult(command, collection, id, slot, assignment.ShardSOTMember, e.Cfg,
+		return wrongMachineResult(command, collection, id, e.Cfg,
 			"This server is not the SHARD_SOT_MEMBER for the target shard.")
 	case "read":
 		if containsServer(assignment.ShardReadMember, e.ServerName) {
 			return nil
 		}
-		hint := ""
-		if len(assignment.ShardReadMember) > 0 {
-			hint = assignment.ShardReadMember[0]
-		}
-		return wrongMachineResult(command, collection, id, slot, hint, e.Cfg,
+		return wrongMachineResult(command, collection, id, e.Cfg,
 			"This server is not a SHARD_READ_MEMBER for the target shard; refresh establishment config and retry.")
 	default:
 		return nil
@@ -666,27 +662,22 @@ func (e *Engine) checkStaleness(id, command, collection string) *envelope.Result
 	return nil
 }
 
-// wrongMachineResult builds the flat wrongMachine response fields described
-// in SHARDING.md and ESTABLISHMENT-CONFIG.md: shardSlot, correctServer,
-// baseURL, and configVersion sit directly on the response envelope
-// (alongside command/collection/id) rather than nested inside the error,
-// so a smart client can read them without digging into errors[0].
-func wrongMachineResult(command, collection, id string, slot byte, correctServer string, cfg *config.Config, message string) *envelope.Result {
-	baseURL := ""
-	if correctServer != "" {
-		if s, ok := cfg.Servers.Servers[correctServer]; ok {
-			baseURL = s.BaseURL
-		}
+// wrongMachineResult builds a wrongMachine refusal. Routing topology is
+// owned by establishment config: the refusing machine must not steer the
+// client with correctServer/baseURL (or any other retry-target hint).
+// configVersion reports only what this refusing server believes and is
+// never authoritative; smart clients always refresh establishment from
+// the establishment server and recompute the next hop locally.
+func wrongMachineResult(command, collection, id string, cfg *config.Config, message string) *envelope.Result {
+	fields := map[string]any{
+		"command":    command,
+		"collection": collection,
+		"id":         id,
 	}
-	res := envelope.Fail(map[string]any{
-		"command":       command,
-		"collection":    collection,
-		"id":            id,
-		"shardSlot":     fmt.Sprintf("%02X", slot),
-		"correctServer": correctServer,
-		"baseURL":       baseURL,
-		"configVersion": cfg.General.General.Version,
-	}, envelope.Error{
+	if cfg != nil {
+		fields["configVersion"] = cfg.General.General.Version
+	}
+	res := envelope.Fail(fields, envelope.Error{
 		Code:    "wrongMachine",
 		Message: message,
 	})

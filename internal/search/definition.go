@@ -5,13 +5,13 @@
 // calculation, clause evaluation against a document, and null/missing-aware
 // deterministic sorting.
 //
-// Per the locked MVP scope, only a narrow operation subset is implemented:
+// Per the locked MVP scope, the implemented operation subset is:
 // `equals` (string/boolean/null-comparison), `in` (string, with a mandatory
-// live `select` variable — the server never unions buckets), and `exists`
-// (any kind, with a truth variable and optional `hideNulls`). Every other
-// V1 operation documented in SEARCHING-V1*.md is recognized by name but
-// rejected as not-yet-implemented, per SEARCHING-V1.md's "MVP
-// Implementation Scope".
+// live `select` variable — the server never unions buckets), `exists`
+// (any kind, with a truth variable and optional `hideNulls`), and array
+// `contains` (scalar item kinds; variable form may index multiple buckets).
+// Every other V1 operation documented in SEARCHING-V1*.md is recognized by
+// name but rejected as not-yet-implemented.
 package search
 
 import (
@@ -27,17 +27,19 @@ import (
 type Op string
 
 const (
-	OpEquals Op = "equals"
-	OpIn     Op = "in"
-	OpExists Op = "exists"
+	OpEquals   Op = "equals"
+	OpIn       Op = "in"
+	OpExists   Op = "exists"
+	OpContains Op = "contains"
 )
 
 // mvpImplementedOps is the set of ops this implementation evaluates. All
 // other documented V1 ops parse but are rejected by Validate.
 var mvpImplementedOps = map[Op]bool{
-	OpEquals: true,
-	OpIn:     true,
-	OpExists: true,
+	OpEquals:   true,
+	OpIn:       true,
+	OpExists:   true,
+	OpContains: true,
 }
 
 // knownV1Ops mirrors the full op vocabulary from SEARCHING-V1.md so
@@ -205,7 +207,7 @@ func (def *Definition) validateClause(i int, c Clause, root ojson.SchemaEntry) [
 		return errs
 	}
 	if !mvpImplementedOps[c.Op] {
-		errs = append(errs, envelope.Error{Code: "unsupportedInMVP", Path: path + "/op", Message: "this V1 operation is specified but not implemented by the narrow MVP search evaluator; only equals, in (with select), and exists are supported", Actual: string(c.Op)})
+		errs = append(errs, envelope.Error{Code: "unsupportedInMVP", Path: path + "/op", Message: "this V1 operation is specified but not implemented by the MVP search evaluator; only equals, in (with select), exists, and contains are supported", Actual: string(c.Op)})
 		return errs
 	}
 	if c.HideNulls && c.Op != OpExists {
@@ -218,6 +220,8 @@ func (def *Definition) validateClause(i int, c Clause, root ojson.SchemaEntry) [
 		errs = append(errs, def.validateIn(path, c, fieldSchema, fieldOK)...)
 	case OpExists:
 		errs = append(errs, def.validateExists(path, c)...)
+	case OpContains:
+		errs = append(errs, def.validateContains(path, c, fieldSchema, fieldOK)...)
 	}
 	return errs
 }
@@ -296,4 +300,74 @@ func (def *Definition) validateExists(path string, c Clause) []envelope.Error {
 		errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/value", Message: "truth variable must start with $"})
 	}
 	return errs
+}
+
+func (def *Definition) validateContains(path string, c Clause, fieldSchema ojson.SchemaEntry, fieldOK bool) []envelope.Error {
+	var errs []envelope.Error
+	if c.HideNulls {
+		errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/hideNulls", Message: "hideNulls is not supported on contains clauses"})
+	}
+	var items ojson.SchemaEntry
+	if fieldOK {
+		if fieldSchema.Kind() != ojson.KindArray {
+			errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/field", Message: "contains requires an array field"})
+			return errs
+		}
+		items = fieldSchema.Items()
+		if !items.Valid() || !scalarArrayItemKind(items.Kind()) {
+			errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/field", Message: "contains requires array items of kind string, number, boolean, or null"})
+			return errs
+		}
+	}
+	if varName, isVar := IsVariable(c.Value); isVar {
+		if !strings.HasPrefix(varName, "$") {
+			errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/value", Message: "variable must start with $"})
+		}
+		if c.Truth != "" {
+			errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/truth", Message: "contains with a variable value must not also declare truth"})
+		}
+		return errs
+	}
+	if c.Truth == "" {
+		errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/truth", Message: "contains with a constant value requires a truth variable"})
+	} else if !strings.HasPrefix(c.Truth, "$") {
+		errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/truth", Message: "truth variable must start with $"})
+	}
+	if fieldOK {
+		if err := containsConstantMatchesItems(c.Value, items.Kind()); err != nil {
+			errs = append(errs, envelope.Error{Code: "invalidSearchDefinition", Path: path + "/value", Message: err.Error()})
+		}
+	}
+	return errs
+}
+
+func scalarArrayItemKind(kind ojson.JSONKind) bool {
+	switch kind {
+	case ojson.KindString, ojson.KindNumber, ojson.KindBoolean, ojson.KindNull:
+		return true
+	default:
+		return false
+	}
+}
+
+func containsConstantMatchesItems(value any, itemKind ojson.JSONKind) error {
+	switch itemKind {
+	case ojson.KindString:
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("string array contains constant requires a string value")
+		}
+	case ojson.KindBoolean:
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("boolean array contains constant requires a boolean value")
+		}
+	case ojson.KindNull:
+		if value != nil {
+			return fmt.Errorf("null array contains constant requires a null value")
+		}
+	case ojson.KindNumber:
+		if !isJSONNumber(value) {
+			return fmt.Errorf("number array contains constant requires a number value")
+		}
+	}
+	return nil
 }

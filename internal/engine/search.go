@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"fmt"
-
 	"github.com/JohnAD/datoriumdb/internal/accesslang"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
@@ -76,22 +74,14 @@ func (e *Engine) checkSearchRouting(slot byte, collection, searchName string) *e
 	if assignment.ShardSOTMember == e.ServerName || containsServer(assignment.ShardReadMember, e.ServerName) || containsServer(assignment.ProxyReadMember, e.ServerName) {
 		return nil
 	}
-	baseURL := ""
-	correctServer := assignment.ShardSOTMember
-	if correctServer != "" {
-		baseURL = e.Cfg.ServerBaseURL(correctServer)
-	}
 	res := envelope.Fail(map[string]any{
 		"command":       "search",
 		"collection":    collection,
 		"search":        searchName,
-		"shardSlot":     fmt.Sprintf("%02X", slot),
-		"correctServer": correctServer,
-		"baseURL":       baseURL,
 		"configVersion": e.Cfg.General.General.Version,
 	}, envelope.Error{
 		Code:    "wrongMachine",
-		Message: "This server does not serve the search result shard for this query.",
+		Message: "This server does not serve the search result shard for this query; refresh establishment config and retry.",
 	})
 	return &res
 }

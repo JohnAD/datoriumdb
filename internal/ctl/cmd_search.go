@@ -9,6 +9,7 @@ import (
 
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
+	"github.com/JohnAD/datoriumdb/internal/search"
 )
 
 func cmdSearchCreate(ctx *Context, args []string) Outcome {
@@ -28,6 +29,15 @@ func cmdSearchCreate(ctx *Context, args []string) Outcome {
 		}
 		if errs := config.ValidateSearchDefinition(raw, collection, name, cfg.Schemas); len(errs) > 0 {
 			return nil, fields, errs
+		}
+		if def, err := search.ParseDefinition(raw); err == nil {
+			if schemaRaw, ok := cfg.Schemas[collection]; ok {
+				if compiled, cerr := config.CompileSchemaBytes(schemaRaw); cerr == nil {
+					if verrs := def.Validate(compiled.Root(), cfg.Schemas); len(verrs) > 0 {
+						return nil, fields, verrs
+					}
+				}
+			}
 		}
 		pretty, err := ReindentJSON(raw)
 		if err != nil {

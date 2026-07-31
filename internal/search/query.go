@@ -3,6 +3,8 @@ package search
 import (
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/JohnAD/ojson"
 )
 
 // ResolveQueryPath computes the encoded search bucket path for a live
@@ -32,6 +34,8 @@ func resolveClauseQuery(c Clause, vars map[string]any) (string, bool, error) {
 		return resolveInQuery(c, vars)
 	case OpExists:
 		return resolveExistsQuery(c, vars)
+	case OpContains:
+		return resolveContainsQuery(c, vars)
 	default:
 		return "", false, fmt.Errorf("unsupported op %q", c.Op)
 	}
@@ -104,6 +108,37 @@ func resolveExistsQuery(c Clause, vars map[string]any) (string, bool, error) {
 		return "", false, fmt.Errorf("exists clause requires a truth variable")
 	}
 	b, err := lookupBoolVar(vars, varName)
+	if err != nil {
+		return "", false, err
+	}
+	return EncodeTruth(b), true, nil
+}
+
+func resolveContainsQuery(c Clause, vars map[string]any) (string, bool, error) {
+	if varName, isVar := IsVariable(c.Value); isVar {
+		v, ok := lookupVar(vars, varName)
+		if !ok {
+			return "", false, fmt.Errorf("missing required variable %s", varName)
+		}
+		kind, ok := inferScalarKind(v)
+		if !ok {
+			return "", false, fmt.Errorf("variable %s must be a string, number, boolean, or null", varName)
+		}
+		if kind == ojson.KindString {
+			if s, ok := v.(string); ok && utf8.RuneCountInString(s) > 63 {
+				return "", false, fmt.Errorf("variable %s exceeds the 63-rune limit for contains", varName)
+			}
+		}
+		seg, err := EncodeScalarByKind(kind, v)
+		if err != nil {
+			return "", false, err
+		}
+		return seg, true, nil
+	}
+	if c.Truth == "" {
+		return "", false, fmt.Errorf("contains constant clause requires a truth variable")
+	}
+	b, err := lookupBoolVar(vars, c.Truth)
 	if err != nil {
 		return "", false, err
 	}

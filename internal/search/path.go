@@ -1,6 +1,7 @@
 package search
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -103,6 +104,92 @@ func EncodeTruth(b bool) string {
 // EncodeNull is the literal path component used for a null comparison
 // value clause.
 const EncodeNull = "null"
+
+// EncodeScalarNumber encodes a JSON number using SEARCHING-V1-number.md's
+// scalar (float64 canonical) directory form.
+func EncodeScalarNumber(v any) (string, error) {
+	f, err := asFloat64(v)
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64), nil
+}
+
+// EncodeScalarByKind encodes a scalar JSON value for a search path segment
+// using the array item's schema kind (SEARCHING-V1-array.md).
+func EncodeScalarByKind(kind ojson.JSONKind, v any) (string, error) {
+	switch kind {
+	case ojson.KindString:
+		s, ok := v.(string)
+		if !ok {
+			return "", fmt.Errorf("expected string value")
+		}
+		return EncodeStringValue(s), nil
+	case ojson.KindBoolean:
+		b, ok := v.(bool)
+		if !ok {
+			return "", fmt.Errorf("expected boolean value")
+		}
+		return EncodeTruth(b), nil
+	case ojson.KindNull:
+		if v != nil {
+			return "", fmt.Errorf("expected null value")
+		}
+		return EncodeNull, nil
+	case ojson.KindNumber:
+		return EncodeScalarNumber(v)
+	default:
+		return "", fmt.Errorf("unsupported scalar kind %s", kind)
+	}
+}
+
+// ScalarsEqual reports whether two decoded JSON scalars are equal under the
+// comparison rules for the given item schema kind. Numbers use scalar
+// (float64) equality.
+func ScalarsEqual(kind ojson.JSONKind, a, b any) bool {
+	switch kind {
+	case ojson.KindString:
+		as, aok := a.(string)
+		bs, bok := b.(string)
+		return aok && bok && as == bs
+	case ojson.KindBoolean:
+		ab, aok := a.(bool)
+		bb, bok := b.(bool)
+		return aok && bok && ab == bb
+	case ojson.KindNull:
+		return a == nil && b == nil
+	case ojson.KindNumber:
+		af, aerr := asFloat64(a)
+		bf, berr := asFloat64(b)
+		return aerr == nil && berr == nil && af == bf
+	default:
+		return false
+	}
+}
+
+func isJSONNumber(v any) bool {
+	_, err := asFloat64(v)
+	return err == nil
+}
+
+func asFloat64(v any) (float64, error) {
+	switch n := v.(type) {
+	case float64:
+		return n, nil
+	case float32:
+		return float64(n), nil
+	case int:
+		return float64(n), nil
+	case int64:
+		return float64(n), nil
+	case json.Number:
+		return n.Float64()
+	case string:
+		return strconv.ParseFloat(n, 64)
+	default:
+		return 0, fmt.Errorf("not a number: %T", v)
+	}
+}
 
 // ShardInput joins encoded path segments (with no leading/trailing slash)
 // into the shard input string described in SEARCHING.md's "Search

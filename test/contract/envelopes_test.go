@@ -146,8 +146,8 @@ func TestGoldenCollectionNotFound(t *testing.T) {
 
 // TestGoldenWrongMachine exercises SHARDING.md's wrongMachine response
 // shape: a server that is not the shard's SHARD_SOT_MEMBER refuses
-// create/patch/delete with routing hints (shardSlot, correctServer,
-// baseURL, configVersion).
+// create/patch/delete without routing hints. Clients must refresh
+// establishment config and recompute the next hop locally.
 func TestGoldenWrongMachine(t *testing.T) {
 	eng := newContractEngine(t)
 	eng.ServerName = "notTheSOTMember"

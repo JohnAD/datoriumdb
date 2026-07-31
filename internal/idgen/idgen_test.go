@@ -1,6 +1,7 @@
 package idgen
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,13 +13,21 @@ func TestValidDocumentID(t *testing.T) {
 	}{
 		{"01ARZ3NDEKTSV4RRFFQ69G5FAV", true},
 		{"abc-123_X", true},
+		{"01ARZ3NDEKTSV4RRFFQ69G5FAV.settings", true},
+		{"user-1.part2", true},
+		{"012345.todo", true},
 		{"", false},
 		{".", false},
 		{"..", false},
 		{"null", false},
+		{".hidden", false},
 		{"../evil", false},
 		{"a/b", false},
 		{"a b", false},
+		// ASCII IDs are bound by MaxDocumentIDBytes (filename NAME_MAX).
+		{strings.Repeat("a", MaxDocumentIDBytes), true},
+		{strings.Repeat("a", MaxDocumentIDBytes+1), false},
+		{strings.Repeat("a", MaxDocumentIDRunes+1), false},
 	}
 	for _, tc := range cases {
 		if got := ValidDocumentID(tc.id); got != tc.want {

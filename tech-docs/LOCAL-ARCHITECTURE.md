@@ -51,7 +51,7 @@ Commands should follow the sharding path even when every shard maps to the same 
 
 1. Compute the document or search shard.
 2. Resolve the target server from establishment configuration.
-3. Accept the command locally or refuse it with a `wrongMachine` error that includes routing hints.
+3. Accept the command locally or refuse it with a `wrongMachine` error (no retry-target hints; clients refresh establishment and re-route).
 
 ## Scheduler
 

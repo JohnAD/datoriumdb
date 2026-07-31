@@ -57,6 +57,41 @@ func TestInvalidDocumentID(t *testing.T) {
 	if code := firstErrorCode(res); code != "invalidDocumentId" {
 		t.Fatalf("unexpected error: %#v", res)
 	}
+	res = eng.Execute(`create Movies .hidden {$: Movies:0, title: "x"}`)
+	if res["ok"] != false || firstErrorCode(res) != "invalidDocumentId" {
+		t.Fatalf("expected leading-dot ID rejected: %#v", res)
+	}
+}
+
+func TestCreateReadPatchDeleteWithPeriodDocumentID(t *testing.T) {
+	eng := testEngine(t)
+	id := "01TESTMOVIES00000000000001.settings"
+	created := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "Settings Doc", releaseYear: 1999, status: released}`)
+	if created["ok"] != true {
+		t.Fatalf("create failed: %#v", created)
+	}
+	if created["id"] != id {
+		t.Fatalf("expected id %q, got %#v", id, created["id"])
+	}
+	path := fsstore.DocumentPath(eng.DataDir, "Movies", id)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	read := eng.Execute(`read Movies ` + id + ` {}`)
+	if read["ok"] != true {
+		t.Fatalf("read failed: %#v", read)
+	}
+	ver, _ := created["#"].(string)
+	patched := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: replace, path: /status, value: archived}]}`)
+	if patched["ok"] != true {
+		t.Fatalf("patch failed: %#v", patched)
+	}
+	versions, _ := patched["versions"].(map[string]any)
+	after, _ := versions["after"].(string)
+	deleted := eng.Execute(`delete Movies ` + id + ` {#: ` + after + `}`)
+	if deleted["ok"] != true {
+		t.Fatalf("delete failed: %#v", deleted)
+	}
 }
 
 func TestCreateBangMismatch(t *testing.T) {

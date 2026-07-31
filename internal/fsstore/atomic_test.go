@@ -76,7 +76,32 @@ func TestSafeID(t *testing.T) {
 	if !SafeID("01ARZ3NDEKTSV4RRFFQ69G5FAV") {
 		t.Fatal("expected valid")
 	}
-	if SafeID("../x") || SafeID("a/b") || SafeID("") {
+	if !SafeID("01ARZ3NDEKTSV4RRFFQ69G5FAV.settings") {
+		t.Fatal("expected period ID valid")
+	}
+	if SafeID("../x") || SafeID("a/b") || SafeID("") || SafeID(".hidden") || SafeID("null") {
 		t.Fatal("expected invalid")
+	}
+}
+
+func TestPreservePreviousWithPeriodID(t *testing.T) {
+	root := t.TempDir()
+	id := "userPrefix.suffix"
+	if err := EnsureCollectionDir(root, "Movies"); err != nil {
+		t.Fatal(err)
+	}
+	live := DocumentPath(root, "Movies", id)
+	if err := WriteDocumentJSON(live, []byte(`{"!":"`+id+`","#":"1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := PreservePreviousIfAbsent(root, "Movies", id); err != nil {
+		t.Fatal(err)
+	}
+	prev := PreviousDocumentPath(root, "Movies", id)
+	if _, err := os.Stat(prev); err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(prev) != "."+id+".json" {
+		t.Fatalf("unexpected previous basename %q", filepath.Base(prev))
 	}
 }

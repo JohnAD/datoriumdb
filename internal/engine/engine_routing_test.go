@@ -74,10 +74,9 @@ func TestWriteRoutesToSOTOnly(t *testing.T) {
 		t.Fatalf("expected SOT create to succeed: %#v", res)
 	}
 
-	// serverA is not the SOT for the high range: create is refused with
-	// flat wrongMachine fields pointing at serverC.
+	// serverA is not the SOT for the high range: create is refused.
 	res = eng.Execute(`create Movies ` + highID + ` {$: Movies:0, title: "x"}`)
-	assertWrongMachine(t, res, "create", "serverC", "http://127.0.0.1:9003")
+	assertWrongMachine(t, res, "create", "Movies", highID)
 }
 
 func TestReadRoutesToReadMemberOnly(t *testing.T) {
@@ -88,7 +87,7 @@ func TestReadRoutesToReadMemberOnly(t *testing.T) {
 	// low range: a read on serverA is refused even though it holds the
 	// source-of-truth copy.
 	res := eng.Execute(`read Movies ` + lowID + ` {}`)
-	assertWrongMachine(t, res, "read", "serverB", "http://127.0.0.1:9002")
+	assertWrongMachine(t, res, "read", "Movies", lowID)
 }
 
 func TestReadSucceedsOnAssignedReadMember(t *testing.T) {
@@ -115,7 +114,7 @@ func TestProxyReadMemberIsNotANormalReadTarget(t *testing.T) {
 	// analysisA is PROXY_READ_MEMBER only for the low range, never
 	// SHARD_READ_MEMBER: normal smart-client reads must still be refused.
 	res := eng.Execute(`read Movies ` + lowID + ` {}`)
-	assertWrongMachine(t, res, "read", "serverB", "http://127.0.0.1:9002")
+	assertWrongMachine(t, res, "read", "Movies", lowID)
 }
 
 func TestWriteRefusedOnReadOnlyMember(t *testing.T) {
@@ -123,7 +122,7 @@ func TestWriteRefusedOnReadOnlyMember(t *testing.T) {
 	lowID := idInSlotRange(t, low, high)
 
 	res := eng.Execute(`create Movies ` + lowID + ` {$: Movies:0, title: "x"}`)
-	assertWrongMachine(t, res, "create", "serverA", "http://127.0.0.1:9001")
+	assertWrongMachine(t, res, "create", "Movies", lowID)
 }
 
 func TestDualRoleServerServesBothReadsAndWrites(t *testing.T) {
@@ -142,7 +141,7 @@ func TestDualRoleServerServesBothReadsAndWrites(t *testing.T) {
 	}
 }
 
-func assertWrongMachine(t *testing.T, res map[string]any, command, wantServer, wantBaseURL string) {
+func assertWrongMachine(t *testing.T, res map[string]any, command, collection, id string) {
 	t.Helper()
 	if res["ok"] != false {
 		t.Fatalf("expected ok:false wrongMachine, got %#v", res)
@@ -153,16 +152,18 @@ func assertWrongMachine(t *testing.T, res map[string]any, command, wantServer, w
 	if res["command"] != command {
 		t.Fatalf("expected flat command field %q, got %#v", command, res)
 	}
-	if res["correctServer"] != wantServer {
-		t.Fatalf("expected flat correctServer field %q, got %#v", wantServer, res)
+	if res["collection"] != collection {
+		t.Fatalf("expected flat collection field %q, got %#v", collection, res)
 	}
-	if res["baseURL"] != wantBaseURL {
-		t.Fatalf("expected flat baseURL field %q, got %#v", wantBaseURL, res)
+	if res["id"] != id {
+		t.Fatalf("expected flat id field %q, got %#v", id, res)
 	}
-	if _, ok := res["shardSlot"].(string); !ok {
-		t.Fatalf("expected a flat shardSlot field, got %#v", res)
+	for _, banned := range []string{"correctServer", "baseURL", "shardSlot"} {
+		if _, ok := res[banned]; ok {
+			t.Fatalf("wrongMachine must not include routing hint field %q: %#v", banned, res)
+		}
 	}
 	if _, ok := res["configVersion"].(int); !ok {
-		t.Fatalf("expected a flat configVersion field, got %#v", res)
+		t.Fatalf("expected diagnostic configVersion field, got %#v", res)
 	}
 }

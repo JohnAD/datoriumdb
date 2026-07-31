@@ -44,7 +44,7 @@ func serverForSlot(slot byte) string {
 // five-shard topology, writes documents whose IDs land on every shard
 // slot's owning server, confirms each write landed on the right
 // container's own /db volume (not just "some" server), and confirms a
-// write sent to the wrong shard owner is refused with a wrongMachine hint
+// write sent to the wrong shard owner is refused with wrongMachine
 // naming the correct server.
 func TestComposeFiveShardCRUDAcrossShardsAndWrongMachine(t *testing.T) {
 	c := Up(t, "docker-compose.five-shard.yml")
@@ -103,8 +103,21 @@ func TestComposeFiveShardCRUDAcrossShardsAndWrongMachine(t *testing.T) {
 			if refused["ok"] != false {
 				t.Fatalf("expected %s (not the shard owner for %s) to refuse the write: %#v", otherOwner, id, refused)
 			}
-			if refused["correctServer"] != owner {
-				t.Fatalf("expected wrongMachine hint to name %s, got %#v", owner, refused)
+			errs, _ := refused["errors"].([]any)
+			if len(errs) == 0 {
+				t.Fatalf("expected wrongMachine errors from %s: %#v", otherOwner, refused)
+			}
+			err0, _ := errs[0].(map[string]any)
+			if err0["code"] != "wrongMachine" {
+				t.Fatalf("expected wrongMachine from %s, got %#v", otherOwner, refused)
+			}
+			for _, banned := range []string{"correctServer", "baseURL", "shardSlot"} {
+				if _, ok := refused[banned]; ok {
+					t.Fatalf("wrongMachine must not include %q: %#v", banned, refused)
+				}
+			}
+			if _, ok := refused["configVersion"]; !ok {
+				t.Fatalf("expected diagnostic configVersion on wrongMachine: %#v", refused)
 			}
 			break // one cross-check per document is enough
 		}

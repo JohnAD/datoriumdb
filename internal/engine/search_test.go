@@ -154,7 +154,12 @@ func TestSearchCommandRefusesWrongShard(t *testing.T) {
 	if code := firstErrorCode(res); code != "wrongMachine" {
 		t.Fatalf("expected wrongMachine, got %q (%#v)", code, res)
 	}
-	if res["correctServer"] != "serverB" {
-		t.Fatalf("expected correctServer=serverB, got %#v", res["correctServer"])
+	for _, banned := range []string{"correctServer", "baseURL", "shardSlot"} {
+		if _, ok := res[banned]; ok {
+			t.Fatalf("wrongMachine must not include routing hint field %q: %#v", banned, res)
+		}
+	}
+	if _, ok := res["configVersion"].(int); !ok {
+		t.Fatalf("expected diagnostic configVersion field, got %#v", res)
 	}
 }
