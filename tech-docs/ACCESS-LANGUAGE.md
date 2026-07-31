@@ -67,7 +67,7 @@ The response is always HTTP `200` with `Content-Type: application/json` and a Da
 
 The command layer remains separate from this transport. Later transports may carry the same command text and envelope shape.
 
-Wrong-machine refusals use `ok: false` with a stable error code such as `wrongMachine` and include enough routing information for the client to retry:
+Wrong-machine refusals use `ok: false` with a stable error code such as `wrongMachine`. The refusing machine must not include retry-target hints (`correctServer`, `baseURL`). Optional `configVersion` reports only what that refusing server believes and is never authoritative routing data. Smart clients always refresh establishment config from the establishment server, recompute the route from the fresh shard map, and retry (bounded):
 
 ```text
 {
@@ -75,14 +75,11 @@ Wrong-machine refusals use `ok: false` with a stable error code such as `wrongMa
   command: create,
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
+  configVersion: 12,
   errors: [
     {
       code: wrongMachine,
-      message: "This server is not assigned to the target shard.",
-      shardSlot: "7A",
-      correctServer: "serverB",
-      baseURL: "https://s32.datoriumdb.com",
-      configVersion: 12
+      message: "This server is not the SHARD_SOT_MEMBER for the target shard."
     }
   ]
 }

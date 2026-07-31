@@ -11,10 +11,8 @@ func TestResolveQueryPathMatchesEvaluateDocument(t *testing.T) {
 		],"sort":[]}}`)
 
 	doc := map[string]any{"status": "released", "genre": "scifi", "highRated": true}
-	docRes, err := EvaluateDocument(def, doc)
-	if err != nil || !docRes.Matched {
-		t.Fatalf("EvaluateDocument failed: %+v err=%v", docRes, err)
-	}
+	_buckets, _err := EvaluateDocument(def, doc)
+	docRes := mustOne(t, _buckets, _err)
 
 	segments, err := ResolveQueryPath(def, map[string]any{"genre": "scifi", "hasHighRated": true})
 	if err != nil {
@@ -66,5 +64,17 @@ func TestResolveQueryPathEqualsConstantNoSegment(t *testing.T) {
 	}
 	if len(segs) != 0 {
 		t.Fatalf("expected zero segments for a pure constant filter clause, got %v", segs)
+	}
+}
+
+func TestResolveQueryPathContainsVariable(t *testing.T) {
+	def := defFrom(t, `{"$":"SearchDefinition:v1","collection":"Todos","name":"n","version":1,
+		"v1":{"clauses":[{"field":"/stateKeys","op":"contains","value":"$status"}],"sort":[]}}`)
+	segs, err := ResolveQueryPath(def, map[string]any{"status": "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 1 || segs[0] != EncodeStringValue("all") {
+		t.Fatalf("unexpected segments: %v", segs)
 	}
 }

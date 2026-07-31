@@ -148,6 +148,33 @@ func TestListPendingWorkItemIDsAcrossCollectionsWithLimitAndTotal(t *testing.T) 
 	}
 }
 
+func TestPendingWriteRoundTripWithPeriodDocumentID(t *testing.T) {
+	dir := t.TempDir()
+	docID := "userPrefix.part.suffix"
+	item := DocumentWorkItem{Collection: "Movies", ID: docID, Command: "create", OperationID: "opPeriod"}
+	if err := WritePendingWrite(dir, "Movies", "serverB", item); err != nil {
+		t.Fatal(err)
+	}
+	ids, total, err := ListPendingWorkItemIDs(dir, "serverB", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(ids) != 1 {
+		t.Fatalf("expected one pending item, got total=%d ids=%#v", total, ids)
+	}
+	gotDocID, ok := DocIDFromWorkItemID(ids[0], "serverB")
+	if !ok || gotDocID != docID {
+		t.Fatalf("expected doc ID %q from work item %q, got %q ok=%v", docID, ids[0], gotDocID, ok)
+	}
+	got, err := ReadPendingWrite(dir, "Movies", "serverB", docID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != docID {
+		t.Fatalf("expected stored ID %q, got %#v", docID, got)
+	}
+}
+
 func TestListPendingWorkItemIDsWithNoPendingWritesDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "Movies"), 0o755); err != nil {

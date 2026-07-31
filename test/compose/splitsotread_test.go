@@ -57,8 +57,21 @@ func TestComposeSplitSOTReadRouting(t *testing.T) {
 	if refused["ok"] != false {
 		t.Fatalf("expected write on read-member to be refused: %#v", refused)
 	}
-	if refused["correctServer"] != "serverA" {
-		t.Fatalf("expected wrongMachine hint to name serverA: %#v", refused)
+	errs, _ := refused["errors"].([]any)
+	if len(errs) == 0 {
+		t.Fatalf("expected wrongMachine errors: %#v", refused)
+	}
+	err0, _ := errs[0].(map[string]any)
+	if err0["code"] != "wrongMachine" {
+		t.Fatalf("expected wrongMachine error code, got %#v", refused)
+	}
+	for _, banned := range []string{"correctServer", "baseURL", "shardSlot"} {
+		if _, ok := refused[banned]; ok {
+			t.Fatalf("wrongMachine must not include %q: %#v", banned, refused)
+		}
+	}
+	if _, ok := refused["configVersion"]; !ok {
+		t.Fatalf("expected diagnostic configVersion on wrongMachine: %#v", refused)
 	}
 }
 

@@ -185,40 +185,46 @@ func (a *Agent) distributeSearch(ctx context.Context, cfg *config.Config, collec
 		if err != nil {
 			return fmt.Errorf("parse search definition %s: %w", name, err)
 		}
-		oldRes, err := search.EvaluateDocument(def, prevDoc)
+		oldBuckets, err := search.EvaluateDocument(def, prevDoc)
 		if err != nil {
 			return fmt.Errorf("evaluate previous document against %s: %w", name, err)
 		}
-		newRes, err := search.EvaluateDocument(def, currentDoc)
+		newBuckets, err := search.EvaluateDocument(def, currentDoc)
 		if err != nil {
 			return fmt.Errorf("evaluate current document against %s: %w", name, err)
 		}
-		sameBucket := oldRes.Matched && newRes.Matched && segmentsEqual(oldRes.Segments, newRes.Segments)
-		if oldRes.Matched && !sameBucket {
+		oldByKey := bucketIndex(oldBuckets)
+		newByKey := bucketIndex(newBuckets)
+		for key, oldRes := range oldByKey {
+			if _, keep := newByKey[key]; keep {
+				continue
+			}
 			if err := a.Router.Remove(ctx, collection, name, oldRes.Segments, id); err != nil {
 				return fmt.Errorf("remove from old %s bucket: %w", name, err)
 			}
 		}
-		if newRes.Matched {
+		if len(newBuckets) > 0 {
 			sortVals := search.ComputeSortValues(def, currentDoc)
-			if err := a.Router.Upsert(ctx, collection, name, newRes.Segments, def, newRes.Key, id, sortVals); err != nil {
-				return fmt.Errorf("upsert into %s bucket: %w", name, err)
+			for key, newRes := range newByKey {
+				_ = key
+				if err := a.Router.Upsert(ctx, collection, name, newRes.Segments, def, newRes.Key, id, sortVals); err != nil {
+					return fmt.Errorf("upsert into %s bucket: %w", name, err)
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func segmentsEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+func bucketIndex(buckets []search.EvalResult) map[string]search.EvalResult {
+	out := make(map[string]search.EvalResult, len(buckets))
+	for _, b := range buckets {
+		if !b.Matched {
+			continue
 		}
+		out[search.ShardInput(b.Segments)] = b
 	}
-	return true
+	return out
 }
 
 // distributeCache implements AGENT-FOR-CHANGE-DISTRIBUTION.md's "Cache

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/ojson"
@@ -35,9 +36,27 @@ func EnsureCollectionDir(dataDir, collection string) error {
 	return os.MkdirAll(CollectionDir(dataDir, collection), 0o755)
 }
 
+// MaxDocumentIDRunes / MaxDocumentIDBytes mirror idgen limits so filesystem
+// paths stay within common NAME_MAX budgets (".{id}.json" adds 6 bytes).
+const (
+	MaxDocumentIDRunes = 255
+	MaxDocumentIDBytes = 249
+)
+
 // SafeID reports whether id is usable as a document filename component.
+// Charset matches CONVENTIONS.md ([A-Za-z0-9_.-]); leading '.' is rejected
+// so live paths cannot collide with hidden system files.
 func SafeID(id string) bool {
-	if id == "" || id == "." || id == ".." {
+	if id == "" || id == "." || id == ".." || id == "null" {
+		return false
+	}
+	if strings.HasPrefix(id, ".") {
+		return false
+	}
+	if utf8.RuneCountInString(id) > MaxDocumentIDRunes {
+		return false
+	}
+	if len(id) > MaxDocumentIDBytes {
 		return false
 	}
 	if strings.Contains(id, "/") || strings.Contains(id, "\\") || strings.Contains(id, string(os.PathSeparator)) {
@@ -49,7 +68,7 @@ func SafeID(id string) bool {
 	}
 	for _, r := range id {
 		switch {
-		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
 		default:
 			return false
 		}

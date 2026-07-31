@@ -24,9 +24,9 @@ If one wanted two machines to share write responsibility for the database, one m
 
 A DB machine can even have no write-authority shards assigned. That machine can act as a live proxy to other machines for reads. Writes, on the other hand, receive a redirect response to the correct shard authority. Writes MUST go to a machine authorized for that shard.
 
-The shard hash is applied to each document's ID prefix. This is the part of the ID before the first dot. If there is no dot, the entire ID is used.
+The shard hash is applied to each document's ID prefix. This is the part of the ID before the first qualifying period. Periods in the first six positions are ignored for prefix detection (matching CONVENTIONS.md). If there is no later period, the entire ID is used.
 
-By assigning shards this way, documents that are likely to be accessed together can be purposely routed to the same shard. For example, if the same system that accesses user document `01KWJYMCTDNTF4MKNHD92FWPGW` is also likely to access that user's settings and mailbox documents, those related documents can use IDs like `01KWJYMCTDNTF4MKNHD92FWPGW.01KWJYMCTDNTF4MKNHD92FWPGW`. The shared prefix routes those documents to the same shard.
+By assigning shards this way, documents that are likely to be accessed together can be purposely routed to the same shard. For example, if the same system that accesses user document `01KWJYMCTDNTF4MKNHD92FWPGW` is also likely to access that user's settings and mailbox documents, those related documents can use IDs like `01KWJYMCTDNTF4MKNHD92FWPGW.settings`. The shared ULID prefix (length ≥ 6) routes those documents to the same shard.
 
 ## MVP Shard-Local Storage Model
 
@@ -38,7 +38,7 @@ In this model:
 - each `SHARD_READ_MEMBER` and `PROXY_READ_MEMBER` stores replicas only for the shard slots assigned to it
 - exactly one machine is the current source-of-truth write authority for a shard slot
 - clients compute the 8-bit shard slot from the document ID prefix
-- if a client sends a command to the wrong machine, that machine refuses with an `ok: false` response that includes the correct target
+- if a client sends a command to the wrong machine, that machine refuses with an `ok: false` `wrongMachine` response; the client refreshes establishment config and retries against the locally computed target
 
 Writes go to the `SHARD_SOT_MEMBER` for the target document's shard. Reads and searches go to an assigned `SHARD_READ_MEMBER`, preferring a local dual-role server when available. `PROXY_READ_MEMBER` servers receive replicated data but are not normal smart-client read targets.
 

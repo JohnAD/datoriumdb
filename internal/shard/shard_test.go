@@ -22,6 +22,24 @@ func TestShardingPrefixUsesFirstPeriodAfterSix(t *testing.T) {
 	}
 }
 
+func TestShardingPrefixIgnoresPeriodsInFirstSixPositions(t *testing.T) {
+	// Period at rune index 5 (0-based) is ignored: whole ID is hashed.
+	early := "01234.rest"
+	if Slot(early) == Slot("01234") {
+		t.Fatalf("period before position 6 must not select a prefix; Slot(%q)=%02X Slot(%q)=%02X",
+			early, Slot(early), "01234", Slot("01234"))
+	}
+	// Period at rune index 6 splits: prefix is the first six runes.
+	qualifying := "012345.todo"
+	if Slot(qualifying) != Slot("012345") {
+		t.Fatalf("period at position 6+ must hash only the prefix: Slot(%q)=%02X Slot(%q)=%02X",
+			qualifying, Slot(qualifying), "012345", Slot("012345"))
+	}
+	if Slot(qualifying) != Slot("012345.other") {
+		t.Fatalf("related suffixes after the same qualifying prefix must share a slot")
+	}
+}
+
 func TestParseRangeAndCoverage(t *testing.T) {
 	r1, err := ParseRange("00-7F")
 	if err != nil {

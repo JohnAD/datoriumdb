@@ -28,9 +28,9 @@ For field names written in other scripts or language systems, follow the natural
 
 Document IDs can be any sequence of letters and numbers, with no whitespace.
 
-Document IDs are limited to 255 runes.
+Document IDs are limited to 255 runes and must also fit filesystem filename budgets: live and previous document paths append `.json` / a leading `.`, so implementations reject IDs longer than 249 UTF-8 bytes.
 
-Document IDs cannot contain punctuation other than underscore, period, and dash.
+Document IDs cannot contain punctuation other than underscore, period, and dash. Document IDs must not begin with a period (so live paths cannot look like hidden system files).
 
 When the database creates document IDs internally, it uses simple ULIDs. See the [ULID specification](https://github.com/ulid/spec).
 

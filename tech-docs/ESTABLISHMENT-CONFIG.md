@@ -377,13 +377,15 @@ For searches, the client computes the search shard from the search parameter pat
 
 ## Wrong-Machine Behavior
 
-If a client sends a command to the wrong machine, that machine should refuse the command.
+If a client sends a command to the wrong machine, that machine should refuse the command with `ok: false` and error code `wrongMachine`.
 
-For writes, the refusal should include enough information for the client to route the command correctly.
+The refusal echoes the command context (`command`, `collection`, `id` or search identity) but must not steer the client with `correctServer`, `baseURL`, or similar retry-target fields. A machine that is already the wrong target is not an authoritative source of routing topology.
 
-For reads or searches, the refusal may tell the client to refresh establishment config and retry.
+`configVersion` may appear on the bounce as a diagnostic: it reports what that refusing server thinks its establishment config version is. Clients may use it to notice that a remote machine looks stale or ahead of their cache, but must not treat it as the authoritative establishment version and must not skip a refresh because the bounce version looks familiar.
 
-The establishment config should include a version so stale clients can detect that their routing data may be outdated.
+On `wrongMachine`, smart clients must always re-fetch establishment config from the establishment server, recompute the route from the fresh shard map, and retry the same command (bounded).
+
+The establishment config should include a version so stale clients can detect that their routing data may be outdated. That version is authoritative only on the establishment document itself.
 
 ## Config Updates
 

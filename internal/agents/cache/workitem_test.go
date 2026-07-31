@@ -99,3 +99,23 @@ func TestListWorkItemIDsAcrossCollectionsWithLimit(t *testing.T) {
 		t.Fatalf("expected no items for an unrelated read server, got %v", otherIDs)
 	}
 }
+
+func TestWorkItemRoundTripWithPeriodDocumentID(t *testing.T) {
+	dir := t.TempDir()
+	docID := "userPrefix.part.suffix"
+	item := WorkItem{SourceCollection: "Movies", SourceDocumentID: docID, Command: "create", Payload: map[string]any{}}
+	if err := WriteWorkItem(dir, "serverB", item); err != nil {
+		t.Fatalf("WriteWorkItem: %v", err)
+	}
+	ids, total, err := ListWorkItemIDs(dir, "serverB", 0)
+	if err != nil {
+		t.Fatalf("ListWorkItemIDs: %v", err)
+	}
+	if total != 1 || len(ids) != 1 {
+		t.Fatalf("expected one work item, got total=%d ids=%v", total, ids)
+	}
+	gotDocID, ok := DocIDFromWorkItemID(ids[0], "serverB")
+	if !ok || gotDocID != docID {
+		t.Fatalf("expected doc ID %q from work item %q, got %q ok=%v", docID, ids[0], gotDocID, ok)
+	}
+}

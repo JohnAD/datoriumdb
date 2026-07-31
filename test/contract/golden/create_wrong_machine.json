@@ -1,9 +1,7 @@
 {
-  "baseURL": "http://127.0.0.1:8080",
   "collection": "Movies",
   "command": "create",
   "configVersion": 1,
-  "correctServer": "serverA",
   "errors": [
     {
       "code": "wrongMachine",
@@ -11,6 +9,5 @@
     }
   ],
   "id": "fixedid007",
-  "ok": false,
-  "shardSlot": "91"
+  "ok": false
 }

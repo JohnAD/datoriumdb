@@ -38,6 +38,7 @@ The first implementation supports a narrow subset:
 - string/boolean/null `equals`
 - string/number constant `in` / `scalarIn` with live selector
 - `exists`
+- array `contains` for scalar item kinds (string/number/boolean/null), including multi-bucket indexing for the variable-value form
 - deterministic sort including `!`
 - AND-only clauses
 
