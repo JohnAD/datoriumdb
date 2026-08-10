@@ -31,6 +31,12 @@ Published binaries are on the
 - **All Searches Must Be Planned** — You cannot ad hoc search on arbitrary fields. Searches are precomposed and involve database migration. That is one reason reads are fast and writes are slower.
 - **Loose Locking** — Updates and deletes must match the document's current version. A client may be refused if the version does not match, and must be prepared to re-read the document and retry.
 
+## Documentation
+
+User documentation for IT operators and application integrators — initial
+setup, running the server, the access API, searching, the consistency model,
+and atomic-update/batching behavior — lives in [docs/](docs/README.md).
+
 ## For developers
 
 Build, test, Compose, and release instructions are in [DEVELOPERS.md](DEVELOPERS.md).
