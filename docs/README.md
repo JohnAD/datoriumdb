@@ -15,6 +15,8 @@ building DatoriumDB itself, see [DEVELOPERS.md](../DEVELOPERS.md).
 - [Consistency Model](consistency.md) — read-after-write behavior,
   source-of-truth vs. read members, and the `documentStale` /
   `readMemberStale` refusals.
+- [Operator Reference](operator-reference.md) — schemas, IDs and naming,
+  size limits, backup/retention, token lifecycle, TLS, and versioning.
 - [Atomic Updates and Batching](atomic-updates.md) — what "atomic updates"
   means today, version-checked writes, and how to structure multi-document
   changes client-side.
