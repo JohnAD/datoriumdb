@@ -362,7 +362,7 @@ A read-member should refuse all reads only after it has been unable to contact t
 
 If the SOT write succeeds but read-member replication is incomplete, the command still returns `ok: true`.
 
-The response includes a `note` object describing the replication issue.
+The response includes a `note` object describing the replication issue and sets `distributionComplete: false`. `distributionComplete` is a separate top-level boolean covering document replication plus search and cache distribution; it is informational and never turns a successful local write into `ok: false`.
 
 Conceptually:
 
@@ -373,6 +373,7 @@ Conceptually:
   collection: Movies,
   id: 01KWDRHGK2GXE2B0VZ85GT546T,
   operationId: 01KXYZ...,
+  distributionComplete: false,
   note: {
     code: replication_retry_scheduled,
     message: "Write succeeded on the SOT-member, but one or more read members did not acknowledge within the timeout. Pending write work has been scheduled.",
@@ -384,7 +385,7 @@ Conceptually:
 }
 ```
 
-The smart client can ignore this note or surface it to the application.
+The smart client can ignore this note or surface it to the application. When every required document, search, and cache target acknowledges the one-shot delivery, `distributionComplete` is `true` and `note` is omitted.
 
 If the local SOT write fails, the command returns `ok: false` with a normal command error.
 

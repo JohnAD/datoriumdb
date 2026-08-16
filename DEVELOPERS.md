@@ -24,9 +24,24 @@ datoriumdb serverA http://127.0.0.1:8080 \
 
 Access-language commands are accepted at `POST /datoriumdb/v1/command`.
 
-To publish versioned `datoriumdb` / `datoriumctl` archives (and optional
-container images) from this repository, see
+## Releasing
+
+Assume your feature branch is ready to merge into `main`. Details:
 [tech-docs/GITHUB-BINARY-DISTRIBUTION.md](tech-docs/GITHUB-BINARY-DISTRIBUTION.md).
+
+```text
+# Push the branch and open/merge the PR on GitHub (CI must be green)
+git push -u origin HEAD
+
+# Cut the release from main (bump the version; latest is currently v0.0.5)
+git checkout main
+git pull
+git tag -a v0.0.6 -m "v0.0.6"
+git push origin v0.0.6
+```
+
+Confirm **Actions → Release** succeeded, then spot-check the GitHub Release
+assets (`datoriumdb_*`, `datoriumctl_*`, `checksums.txt`).
 
 ## Testing
 

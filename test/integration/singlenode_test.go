@@ -47,6 +47,9 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
+	if created["distributionComplete"] != true {
+		t.Fatalf("expected distributionComplete true on single-node create: %#v", created)
+	}
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 	if id == "" || ver == "" {

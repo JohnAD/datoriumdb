@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/agents/change"
 	"github.com/JohnAD/datoriumdb/internal/auth"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
@@ -89,12 +90,42 @@ func newReplicationTopology(t *testing.T) *replicationTopology {
 		Cfg:        sotEng.Cfg,
 		Tokens:     replication.IssuerTokenSource{Issuer: issuer, ServerName: "serverA"},
 	}
+	wireDistributor(t, sotEng, issuer)
 
 	return &replicationTopology{
 		sot: sotEng, read: readEng, proxy: proxyEng,
 		readTS: readTS, proxyTS: proxyTS,
 		issuer: issuer,
 	}
+}
+
+func wireDistributor(t *testing.T, eng *engine.Engine, issuer *auth.Issuer) {
+	t.Helper()
+	cfgSource := func() *config.Config { return eng.Cfg }
+	tokens := replication.IssuerTokenSource{Issuer: issuer, ServerName: eng.ServerName}
+	local := &change.LocalApplier{DataDir: eng.DataDir}
+	agent := &change.Agent{
+		DataDir:    eng.DataDir,
+		ServerName: eng.ServerName,
+		Cfg:        cfgSource,
+		Router: &change.ShardRouter{
+			ServerName: eng.ServerName,
+			Cfg:        cfgSource,
+			Local:      local,
+			Remote:     &change.RemoteApplier{Cfg: cfgSource, Tokens: tokens},
+		},
+		CachePush: &change.RemoteCachePusher{Cfg: cfgSource, Tokens: tokens},
+	}
+	eng.Distributor = distributorAdapter{agent: agent}
+}
+
+type distributorAdapter struct {
+	agent *change.Agent
+}
+
+func (d distributorAdapter) ProcessNow(ctx context.Context, changeName, collection, id string) engine.DistributionResult {
+	r := d.agent.ProcessNow(ctx, changeName, collection, id)
+	return engine.DistributionResult{Complete: r.Complete, Err: r.Err}
 }
 
 func readLocalDoc(t *testing.T, eng *engine.Engine, collection, id string) map[string]any {
@@ -122,6 +153,9 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	}
 	if _, hasNote := created["note"]; hasNote {
 		t.Fatalf("expected no note when every target acknowledges: %#v", created)
+	}
+	if created["distributionComplete"] != true {
+		t.Fatalf("expected distributionComplete true on happy-path create: %#v", created)
 	}
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
@@ -155,6 +189,9 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	if _, hasNote := patched["note"]; hasNote {
 		t.Fatalf("expected no note when every target acknowledges patch: %#v", patched)
 	}
+	if patched["distributionComplete"] != true {
+		t.Fatalf("expected distributionComplete true on happy-path patch: %#v", patched)
+	}
 	versions, _ := patched["versions"].(map[string]any)
 	afterVer, _ := versions["after"].(string)
 
@@ -177,6 +214,9 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	if _, hasNote := deleted["note"]; hasNote {
 		t.Fatalf("expected no note when every target acknowledges delete: %#v", deleted)
 	}
+	if deleted["distributionComplete"] != true {
+		t.Fatalf("expected distributionComplete true on happy-path delete: %#v", deleted)
+	}
 	if !localDocGone(topo.read, "Movies", id) {
 		t.Fatalf("expected one-shot delete on read-member")
 	}
@@ -195,6 +235,9 @@ func TestReplicationOneShotDownMemberPendingAndNote(t *testing.T) {
 	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Down Member Test"}`)
 	if created["ok"] != true {
 		t.Fatalf("expected SOT-local success even though a read-member is down: %#v", created)
+	}
+	if created["distributionComplete"] != false {
+		t.Fatalf("expected distributionComplete false when a read-member is down: %#v", created)
 	}
 	id, _ := created["id"].(string)
 

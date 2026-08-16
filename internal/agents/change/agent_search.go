@@ -3,7 +3,9 @@ package change
 import (
 	"context"
 	"fmt"
+	"sync"
 
+	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/search"
 )
@@ -58,16 +60,15 @@ func (l *LocalApplier) Remove(_ context.Context, collection, searchName string, 
 	return err
 }
 
-// ShardRouter decides, per bucket, whether to apply a search mutation
-// locally (this server is the search shard's SOT) or to hand it off to
-// Remote for cross-server delivery.
+// ShardRouter applies a search mutation locally when this server is among
+// the assigned targets and pushes the same mutation to every other
+// assigned SOT/READ/proxy member of the search shard.
 type ShardRouter struct {
 	ServerName string
 	Cfg        ConfigSource
 	Local      *LocalApplier
-	// Remote handles delivery when a different server is the search
-	// shard's SOT. It may be nil; see RemoteApplier's doc comment for the
-	// current MVP scope of cross-server search delivery.
+	// Remote handles delivery to other servers. Nil is only valid for
+	// single-node tests where every target is this server.
 	Remote *RemoteApplier
 }
 
@@ -77,88 +78,107 @@ func (r *ShardRouter) owner(segments []string) (server string, slot byte) {
 	return cfg.SOTForSlot(slot), slot
 }
 
-// Upsert implements SearchRouter, routing to Local or Remote by shard, and
-// (when this server is the search shard's SOT) replicating the same
-// mutation out to that shard's read/proxy members, per SHARDING.md/
-// SERVER-TO-SERVER-API.md's "Happy-Path Search Result Delivery".
+// Upsert implements SearchRouter with full-set fan-out.
 func (r *ShardRouter) Upsert(ctx context.Context, collection, searchName string, segments []string, def *search.Definition, key []any, id string, sortVals []search.SortValue) error {
-	owner, slot := r.owner(segments)
-	if owner == "" || owner == r.ServerName {
-		if err := r.Local.Upsert(ctx, collection, searchName, segments, def, key, id, sortVals); err != nil {
-			return err
-		}
-		return r.replicate(ctx, slot, collection, searchName, segments, "upsert", id, search.SortValuesToJSON(sortVals))
-	}
-	if r.Remote == nil {
-		return fmt.Errorf("search shard %02X for %s.%s is owned by remote server %q; cross-server search delivery is not configured on this agent", slot, collection, searchName, owner)
-	}
-	return r.Remote.Upsert(ctx, owner, collection, searchName, segments, id, search.SortValuesToJSON(sortVals))
+	return r.deliver(ctx, collection, searchName, segments, "upsert", id, search.SortValuesToJSON(sortVals), func() error {
+		return r.Local.Upsert(ctx, collection, searchName, segments, def, key, id, sortVals)
+	})
 }
 
-// Remove implements SearchRouter, routing to Local or Remote by shard, and
-// (when this server is the search shard's SOT) replicating the removal to
-// that shard's read/proxy members.
+// Remove implements SearchRouter with full-set fan-out.
 func (r *ShardRouter) Remove(ctx context.Context, collection, searchName string, segments []string, id string) error {
-	owner, slot := r.owner(segments)
-	if owner == "" || owner == r.ServerName {
-		if err := r.Local.Remove(ctx, collection, searchName, segments, id); err != nil {
-			return err
-		}
-		return r.replicate(ctx, slot, collection, searchName, segments, "remove", id, nil)
-	}
-	if r.Remote == nil {
-		return fmt.Errorf("search shard %02X for %s.%s is owned by remote server %q; cross-server search delivery is not configured on this agent", slot, collection, searchName, owner)
-	}
-	return r.Remote.Remove(ctx, owner, collection, searchName, segments, id)
+	return r.deliver(ctx, collection, searchName, segments, "remove", id, nil, func() error {
+		return r.Local.Remove(ctx, collection, searchName, segments, id)
+	})
 }
 
-// replicate pushes a search-result mutation this server just applied
-// locally (as the search shard's SOT) out to every read/proxy member of
-// that same shard slot, per SEARCHING.md's "Search Sharding": read
-// members serve search results the same way they serve documents, so
-// they need their own local copy of the bucket file. If Remote is not
-// configured (e.g. this server cannot authenticate outbound calls),
-// replication is a documented no-op gap rather than a hard failure,
-// matching this MVP's narrowed scope for search cross-server delivery.
-// A failed delivery to a configured target returns an error so the
-// change-agent's queue entry is retried on the next scan, per
-// RemoteApplier's doc comment ("the SOT may retry push delivery and rely
-// on the change-agent's retryable nature").
-func (r *ShardRouter) replicate(ctx context.Context, slot byte, collection, searchName string, segments []string, op, id string, sortJSON []any) error {
-	if r.Remote == nil {
-		return nil
-	}
+func (r *ShardRouter) deliver(ctx context.Context, collection, searchName string, segments []string, op, id string, sortJSON []any, localApply func() error) error {
+	owner, slot := r.owner(segments)
 	cfg := r.Cfg()
 	assignment, ok := cfg.SlotAssignment(slot)
 	if !ok {
-		return nil
+		if owner == "" || owner == r.ServerName {
+			return localApply()
+		}
+		if r.Remote == nil {
+			return fmt.Errorf("search shard %02X for %s.%s is owned by remote server %q; cross-server search delivery is not configured on this agent", slot, collection, searchName, owner)
+		}
+		return r.remoteOne(ctx, owner, collection, searchName, segments, op, id, sortJSON)
 	}
-	targets := dedupExcludingSelf(r.ServerName, assignment.ShardReadMember, assignment.ProxyReadMember)
+
+	targets := searchShardTargets(owner, assignment)
+	selfIsTarget := false
+	for _, t := range targets {
+		if t == r.ServerName {
+			selfIsTarget = true
+			break
+		}
+	}
+	if selfIsTarget {
+		if err := localApply(); err != nil {
+			return err
+		}
+	}
+
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
 	for _, target := range targets {
-		var err error
-		switch op {
-		case "upsert":
-			err = r.Remote.Upsert(ctx, target, collection, searchName, segments, id, sortJSON)
-		case "remove":
-			err = r.Remote.Remove(ctx, target, collection, searchName, segments, id)
+		if target == r.ServerName {
+			continue
 		}
-		if err != nil {
-			return fmt.Errorf("replicate search %s to read member %q: %w", op, target, err)
+		if r.Remote == nil {
+			return fmt.Errorf("search shard %02X for %s.%s requires remote delivery to %q; cross-server search delivery is not configured on this agent", slot, collection, searchName, target)
 		}
+		wg.Add(1)
+		go func(target string) {
+			defer wg.Done()
+			if err := r.remoteOne(ctx, target, collection, searchName, segments, op, id, sortJSON); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("replicate search %s to %q: %w", op, target, err)
+				}
+				mu.Unlock()
+			}
+		}(target)
 	}
-	return nil
+	wg.Wait()
+	return firstErr
 }
 
-func dedupExcludingSelf(self string, groups ...[]string) []string {
+func (r *ShardRouter) remoteOne(ctx context.Context, target, collection, searchName string, segments []string, op, id string, sortJSON []any) error {
+	switch op {
+	case "upsert":
+		return r.Remote.Upsert(ctx, target, collection, searchName, segments, id, sortJSON)
+	case "remove":
+		return r.Remote.Remove(ctx, target, collection, searchName, segments, id)
+	default:
+		return fmt.Errorf("unknown search operation %q", op)
+	}
+}
+
+// searchShardTargets returns every server that must hold the search-result
+// bucket: the search SOT plus READ/proxy members, deduplicated.
+func searchShardTargets(owner string, assignment config.ShardAssignment) []string {
+	return dedupOrdered(owner, assignment.ShardReadMember, assignment.ProxyReadMember)
+}
+
+func dedupOrdered(first string, groups ...[]string) []string {
 	seen := map[string]bool{}
 	var out []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	add(first)
 	for _, group := range groups {
 		for _, name := range group {
-			if name == "" || name == self || seen[name] {
-				continue
-			}
-			seen[name] = true
-			out = append(out, name)
+			add(name)
 		}
 	}
 	return out

@@ -2,6 +2,7 @@
   "$": "Movies:0",
   "collection": "Movies",
   "command": "patch",
+  "distributionComplete": false,
   "id": "fixedid003",
   "ok": true,
   "operationId": "<ID:1>",

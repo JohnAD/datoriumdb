@@ -7,27 +7,27 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/JohnAD/datoriumdb/internal/agents/cache"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 )
 
 // RemoteApplier delivers a search-result bucket mutation to a remote
-// search-shard SOT server over HTTP, per SERVER-TO-SERVER-API.md's "Happy-
-// Path Search Result Delivery". SEARCHING.md notes search delivery may
-// retry at the push layer instead of using a `.pendingWrites`-style
-// fallback for MVP ("the SOT may retry push delivery and rely on the
-// change-agent's retryable nature"); RemoteApplier returning an error
-// leaves the change-agent's queue entry as `.taken` so the next scan
-// retries the whole item, which satisfies that retry requirement.
+// server over HTTP, per SERVER-TO-SERVER-API.md's "Happy-Path Search
+// Result Delivery". SEARCHING.md notes search delivery may retry at the
+// push layer instead of using a `.pendingWrites`-style fallback for MVP
+// ("the SOT may retry push delivery and rely on the change-agent's
+// retryable nature"); RemoteApplier returning an error leaves the
+// change-agent's queue entry as `.taken` so the next scan retries the
+// whole item, which satisfies that retry requirement.
 //
 // The request/response body used here is a simplified, self-contained
 // operation description (collection/search/segments/operation/id/sort)
 // rather than the illustrative positional-RFC6902 example shown in
 // SERVER-TO-SERVER-API.md, because that document leaves the exact search
-// patch wire shape as an open question ("Timeout fallback may use pending
-// search-result work under the search directory in a later refinement").
-// The receiving server re-resolves the search definition itself from its
-// own establishment config and applies the same idempotent
-// search.ResultFile.Upsert/Remove logic used locally.
+// patch wire shape as an open question. The receiving server re-resolves
+// the search definition itself from its own establishment config and
+// applies the same idempotent search.ResultFile.Upsert/Remove logic used
+// locally.
 type RemoteApplier struct {
 	Cfg        ConfigSource
 	Tokens     replication.TokenSource
@@ -121,4 +121,68 @@ func (r *RemoteApplier) Remove(ctx context.Context, targetServer, collection, se
 		Operation:  "remove",
 		ID:         id,
 	})
+}
+
+// RemoteCachePusher delivers a cache-update work item to a remote
+// read/proxy member via the one-shot apply-cache-update endpoint.
+type RemoteCachePusher struct {
+	Cfg        ConfigSource
+	Tokens     replication.TokenSource
+	HTTPClient *http.Client
+}
+
+func (r *RemoteCachePusher) httpClient() *http.Client {
+	if r.HTTPClient != nil {
+		return r.HTTPClient
+	}
+	return http.DefaultClient
+}
+
+// Push implements CachePusher.
+func (r *RemoteCachePusher) Push(ctx context.Context, targetServer string, item cache.WorkItem) error {
+	baseURL := r.Cfg().ServerBaseURL(targetServer)
+	if baseURL == "" {
+		return fmt.Errorf("no known baseURL for server %q", targetServer)
+	}
+	tok, err := r.Tokens.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("obtain machine token: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"targetServer": targetServer,
+		"item":         item,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/datoriumdb/v1/sys/apply-cache-update", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := r.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("call apply-cache-update: %w", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK      bool `json:"ok"`
+		Applied bool `json:"applied"`
+		Errors  []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return fmt.Errorf("decode apply-cache-update response: %w", err)
+	}
+	if !out.OK {
+		msg := "unknown error"
+		if len(out.Errors) > 0 {
+			msg = fmt.Sprintf("%s: %s", out.Errors[0].Code, out.Errors[0].Message)
+		}
+		return fmt.Errorf("apply-cache-update failed: %s", msg)
+	}
+	return nil
 }

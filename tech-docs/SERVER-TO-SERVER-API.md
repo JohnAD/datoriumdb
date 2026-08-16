@@ -141,6 +141,32 @@ Request body:
 
 Application is idempotent by `operationId`. Timeout fallback may use pending search-result work under the search directory in a later refinement; for MVP, the SOT may retry push delivery and rely on the change-agent's retryable nature.
 
+## Happy-Path Cache Update Delivery
+
+Cache-update replication uses a one-shot push with durable pending fallback:
+
+```text
+POST /datoriumdb/v1/sys/apply-cache-update
+```
+
+Request body:
+
+```json
+{
+  "targetServer": "serverB",
+  "item": {
+    "sourceCollection": "Movies",
+    "sourceDocumentId": "01KWDRHGK2GXE2B0VZ85GT546T",
+    "afterVersion": "01KWDRK4X3AV9BN9MZ3EY4Y2K8",
+    "operationId": "01KWDRK4X7F1M9W5K0D9S1P3QH",
+    "command": "create",
+    "payload": { "!": "01KWDRHGK2GXE2B0VZ85GT546T", "$": "Movies:0", "#": "01KWDRK4X3AV9BN9MZ3EY4Y2K8", "title": "The Matrix" }
+  }
+}
+```
+
+On success the read member returns `{ ok: true, applied: true }`. The SOT deletes the matching `.pendingCacheUpdates` file only after acknowledgement. Targets that do not acknowledge keep the pending file for pull catch-up below.
+
 ## Pending Writes
 
 When a `SHARD_SOT_MEMBER` cannot deliver a write to a read member in time, it creates a pending write file under the affected collection's `.pendingWrites` directory.

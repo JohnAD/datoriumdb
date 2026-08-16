@@ -133,3 +133,65 @@ func (s *HTTPServer) handleCompletePendingCacheUpdate(w http.ResponseWriter, r *
 	}
 	writeJSON(w, envelope.OK(map[string]any{"completed": true}))
 }
+
+type applyCacheUpdateRequest struct {
+	TargetServer string         `json:"targetServer"`
+	Item         cache.WorkItem `json:"item"`
+}
+
+// handleApplyCacheUpdate is the read/proxy member side of the SOT's
+// one-shot cache-update push: apply the work item to local .cache files
+// idempotently. Pending-file catch-up remains available when this push
+// does not acknowledge.
+func (s *HTTPServer) handleApplyCacheUpdate(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		writeJSON(w, envelope.Fail(nil, envelope.Error{
+			Code:    "contentTypeRequired",
+			Message: "Content-Type must be application/json",
+		}))
+		return
+	}
+	body, ferr := readBodyLimited(w, r, maxCommandBodyBytes)
+	if ferr != nil {
+		writeJSON(w, envelope.Fail(nil, *ferr))
+		return
+	}
+	var req applyCacheUpdateRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, envelope.Fail(nil, envelope.Error{Code: "invalidRequest", Message: err.Error()}))
+		return
+	}
+	if req.TargetServer == "" {
+		writeJSON(w, envelope.Fail(nil, envelope.Error{
+			Code:    "invalidRequest",
+			Path:    "/targetServer",
+			Message: "targetServer is required",
+		}))
+		return
+	}
+	if err := auth.RequireMachine(claims, ""); err != nil {
+		writeJSON(w, envelope.Fail(map[string]any{"targetServer": req.TargetServer}, toEnvelopeError(err)))
+		return
+	}
+	if req.TargetServer != s.Engine.ServerName {
+		writeJSON(w, envelope.Fail(map[string]any{"targetServer": req.TargetServer}, envelope.Error{
+			Code:     "targetServerMismatch",
+			Message:  "this delivery is not addressed to this server",
+			Expected: s.Engine.ServerName,
+			Actual:   req.TargetServer,
+		}))
+		return
+	}
+	if req.Item.SourceCollection == "" || req.Item.SourceDocumentID == "" {
+		writeJSON(w, envelope.Fail(nil, envelope.Error{
+			Code:    "invalidRequest",
+			Message: "item.sourceCollection and item.sourceDocumentId are required",
+		}))
+		return
+	}
+	if _, err := cache.Apply(s.Engine.DataDir, req.Item); err != nil {
+		writeJSON(w, envelope.Fail(nil, envelope.Error{Code: "applyFailed", Message: err.Error()}))
+		return
+	}
+	writeJSON(w, envelope.OK(map[string]any{"applied": true}))
+}

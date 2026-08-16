@@ -23,6 +23,8 @@ Each of the following creates a queue entry after its operation:
 - a `delete` command
 - any patch action run by the `upgrade-agent` background agent
 
+Successful writes also attempt to process that queue entry synchronously before returning, so the response can set `distributionComplete: true` when search and cache fan-out finish in the one-shot window. The periodic change-agent remains the durable fallback when synchronous processing is busy, times out, or leaves pending remote work.
+
 The format of the filename is `{change}__{collection}__{id}.queue`. The `{change}` part is one of `create`, `patch`, or `delete`. The file contains no data. If a queue file for the same collection, ID, and change already exists, it is left alone.
 
 For example:

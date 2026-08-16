@@ -127,13 +127,13 @@ The database owns some document metadata fields:
 - If `{content}` omits `!`, the server fills it from `{id}`.
 - `{content}` cannot include a `#` version field because document versions are created by the database.
 
-On a sharded deployment, after the SOT commits the document locally it makes one live delivery attempt to each assigned read/proxy member. Targets that acknowledge are done; targets that do not get a `.pendingWrites` entry, after which the SOT stops worrying about them. A response `note` may name unacknowledged targets. Separating SOT and READ so they scale independently means a successful create does not guarantee every READ already has the document — see [SHARDING.md](SHARDING.md).
+On a sharded deployment, after the SOT commits the document locally it makes one live delivery attempt to each assigned read/proxy member. Targets that acknowledge are done; targets that do not get a `.pendingWrites` entry, after which the SOT stops worrying about them. A response `note` may name unacknowledged targets. The SOT then attempts synchronous search and cache distribution for the same document. Separating SOT and READ so they scale independently means a successful create does not guarantee every READ already has the document — see [SHARDING.md](SHARDING.md).
 
 ### Create Returns
 
 The `create` response is a result envelope.
 
-On success, it returns command metadata and the newly created document version:
+On success, it returns command metadata, the newly created document version, and an informational `distributionComplete` flag:
 
 ```text
 {
@@ -143,9 +143,12 @@ On success, it returns command metadata and the newly created document version:
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   $: Movies:0,
   #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
-  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT
+  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT,
+  distributionComplete: true
 }
 ```
+
+`distributionComplete` is `true` only when document replication, search-index updates, and cached-summary updates all reached every required target (or no such work was required). `false` is not an error — the local SOT write still succeeded and remaining work continues asynchronously.
 
 On failure, it returns `ok: false` and an `errors` array:
 
@@ -337,7 +340,7 @@ This restriction applies to user-submitted access-language patches. Internal SOT
 
 The `patch` response is a result envelope.
 
-On success, it returns command metadata and the document versions before and after the patch:
+On success, it returns command metadata, the document versions before and after the patch, and informational `distributionComplete`:
 
 ```text
 {
@@ -347,6 +350,7 @@ On success, it returns command metadata and the document versions before and aft
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   $: Movies:0,
   operationId: 01KWHM7R7D3T50G0GH6XN4CRZT,
+  distributionComplete: true,
   versions: {
     before: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
     after: 01KWD65EJ5F61CE0GS9SX4V4FT
@@ -405,7 +409,7 @@ delete Movies 01KWD65CFQPEZS7H1WJE4MK990 {#: 01KWD65D94Y5M8C2Z7HJ3N6VQK, operati
 
 The `delete` response is a result envelope.
 
-On success, it returns command metadata and the deleted document version:
+On success, it returns command metadata, the deleted document version, and informational `distributionComplete`:
 
 ```text
 {
@@ -414,7 +418,8 @@ On success, it returns command metadata and the deleted document version:
   collection: Movies,
   id: 01KWD65CFQPEZS7H1WJE4MK990,
   #: 01KWD65D94Y5M8C2Z7HJ3N6VQK,
-  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT
+  operationId: 01KWHM7R7D3T50G0GH6XN4CRZT,
+  distributionComplete: true
 }
 ```
 
