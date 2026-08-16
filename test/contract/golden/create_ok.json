@@ -3,6 +3,7 @@
   "$": "Movies:0",
   "collection": "Movies",
   "command": "create",
+  "distributionComplete": false,
   "id": "01TESTMOVIES00000000000001",
   "ok": true,
   "operationId": "<ID:2>"

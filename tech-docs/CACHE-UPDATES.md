@@ -6,13 +6,15 @@ Cached summaries are derived data. They are allowed to be temporarily stale, but
 
 ## Process
 
-After an SOT-member receives a document create, patch, or delete, it queues cache update work for read members.
+After an SOT-member receives a document create, patch, or delete, it queues cache update work for read members as part of change-agent processing.
 
-The original write does not wait for cache updates to finish. Instead, as part of the SOT write, the server creates pending cache update work items under:
+The write path attempts a one-shot apply for each target (local apply for self, `POST /datoriumdb/v1/sys/apply-cache-update` for remotes) before returning. Targets that acknowledge have their pending file deleted immediately. Targets that do not keep a durable pending file under:
 
 ```text
 /db/{CollectionName}/.pendingCacheUpdates/{readServerName}.{docId}.json
 ```
+
+`distributionComplete` is `true` only when every required cache target applied successfully (along with document replication and search distribution). A `false` value is informational; pull-based catch-up still runs.
 
 `{CollectionName}` and `{docId}` identify the source document that changed.
 

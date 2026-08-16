@@ -46,6 +46,9 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	if _, hasNote := created["note"]; hasNote {
 		t.Fatalf("expected one-shot delivery with no note when the read-member is up: %#v", created)
 	}
+	if created["distributionComplete"] != true {
+		t.Fatalf("expected distributionComplete true when read-member acknowledges: %#v", created)
+	}
 	id, _ := created["id"].(string)
 
 	// Read-member catch-up pulls the staged pending write onto serverB.

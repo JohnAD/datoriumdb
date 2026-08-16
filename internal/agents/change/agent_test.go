@@ -337,25 +337,33 @@ func TestChangeAgentCacheDistributionFanOut(t *testing.T) {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
+	// Self is the only read member: one-shot local apply deletes the
+	// pending file after success (pull catch-up is only for remotes).
 	path := fsstore.PendingCacheUpdatePath(dataDir, "Movies", "serverA", "id1")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("expected a pending cache update work item at %s: %v", path, err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected pending cache update for self to be cleared after local apply, stat err=%v", err)
 	}
-	var item struct {
-		SourceCollection string         `json:"sourceCollection"`
-		SourceDocumentID string         `json:"sourceDocumentId"`
-		Command          string         `json:"command"`
-		Payload          map[string]any `json:"payload"`
+}
+
+func TestChangeAgentProcessNowCompletesOnSingleNode(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := testConfig(false)
+	agent := newTestAgent(t, dataDir, cfg)
+
+	writeMovie(t, dataDir, "id1", "released")
+	if err := fsstore.EnqueueChange(dataDir, "Movies", "id1", "create"); err != nil {
+		t.Fatalf("enqueue: %v", err)
 	}
-	if err := json.Unmarshal(data, &item); err != nil {
-		t.Fatalf("decode pending cache update: %v", err)
+	res := agent.ProcessNow(context.Background(), "create", "Movies", "id1")
+	if res.Err != nil {
+		t.Fatalf("ProcessNow: %v", res.Err)
 	}
-	if item.SourceCollection != "Movies" || item.SourceDocumentID != "id1" || item.Command != "create" {
-		t.Fatalf("unexpected pending cache update item: %+v", item)
+	if !res.Complete {
+		t.Fatalf("expected distribution complete on single-node ProcessNow")
 	}
-	if item.Payload["title"] != "T" {
-		t.Fatalf("expected the full source document as payload, got %+v", item.Payload)
+	segs := []string{search.EncodeStringValue("released")}
+	if rf := readMatches(t, dataDir, "Movies", "byStatus", segs); !bucketHasID(rf, "id1") {
+		t.Fatalf("expected search bucket updated by ProcessNow")
 	}
 }
 

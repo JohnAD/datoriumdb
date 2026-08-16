@@ -29,6 +29,23 @@ type ClockULID struct{}
 
 func (ClockULID) New() (string, error) { return idgen.New() }
 
+// Distributor synchronously processes one change-queue entry after a
+// write so the response can report whether search/cache distribution
+// finished. Nil leaves distribution to the background change-agent and
+// forces distributionComplete=false when a queue entry was enqueued.
+type Distributor interface {
+	ProcessNow(ctx context.Context, change, collection, id string) DistributionResult
+}
+
+// DistributionResult is the non-error hint returned by Distributor.
+// Complete is true only when every search and cache target applied the
+// change; Err is reserved for hard processing failures that left the
+// change entry retryable.
+type DistributionResult struct {
+	Complete bool
+	Err      error
+}
+
 // Engine executes access-language commands against local filesystem storage.
 type Engine struct {
 	ConfigDir  string
@@ -43,6 +60,11 @@ type Engine struct {
 	// operation, but nothing is pushed (e.g. single-machine mode, or a
 	// server not currently wired for outbound replication calls).
 	Replicator *replication.Coordinator
+
+	// Distributor optionally drains the just-enqueued change-queue entry
+	// before the write response returns. Nil is valid for in-process
+	// tests that do not wire agents.
+	Distributor Distributor
 
 	// ReadState tracks read-member catch-up staleness (per-document and
 	// per-SOT-server), per REPLICATION-FAILURE-HANDLING.md's "Read-Member
@@ -696,19 +718,30 @@ func containsServer(list []string, want string) bool {
 // deliverOnce runs the one-shot live delivery contract for a just-committed
 // create/patch/delete: try each read/proxy target once; stage .pendingWrites
 // only for targets that do not acknowledge; optionally attach a response
-// note naming those targets. After this returns, the SOT is done — READ
-// members own catch-up. There is no durable .operations tracking.
+// note naming those targets; then attempt synchronous search/cache
+// distribution. distributionComplete is informational only and never turns
+// a successful local SOT write into ok:false.
 func (e *Engine) deliverOnce(item replication.DocumentWorkItem, result envelope.Result) envelope.Result {
-	if e.Replicator == nil {
-		return result
+	docComplete := true
+	if e.Replicator != nil {
+		slot := shard.Slot(item.ID)
+		assignment := replication.AssignmentForSlot(e.Cfg, slot)
+		targets := e.Replicator.TargetsForAssignment(assignment)
+		outcome := e.Replicator.DeliverOnce(context.Background(), item, targets)
+		docComplete = outcome.Complete()
+		if !docComplete {
+			result["note"] = replication.BuildNote(outcome)
+		}
 	}
-	slot := shard.Slot(item.ID)
-	assignment := replication.AssignmentForSlot(e.Cfg, slot)
-	targets := e.Replicator.TargetsForAssignment(assignment)
-	outcome := e.Replicator.DeliverOnce(context.Background(), item, targets)
-	if !outcome.Complete() {
-		result["note"] = replication.BuildNote(outcome)
+
+	derivedComplete := false
+	if e.Distributor != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), replication.DefaultTimeout)
+		defer cancel()
+		dr := e.Distributor.ProcessNow(ctx, item.Command, item.Collection, item.ID)
+		derivedComplete = dr.Complete
 	}
+	result["distributionComplete"] = docComplete && derivedComplete
 	return result
 }
 

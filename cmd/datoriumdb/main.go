@@ -189,6 +189,10 @@ func main() {
 		Exclusion:  docExclusion,
 		Logf:       log.Printf,
 	}
+	if tokens != nil {
+		changeAgent.CachePush = &change.RemoteCachePusher{Cfg: cfgSource, Tokens: tokens}
+	}
+	eng.Distributor = distributorAdapter{agent: changeAgent}
 	sched.Register(scheduler.Agent{
 		Name:     "change-agent",
 		Interval: 2 * time.Second,
@@ -275,4 +279,14 @@ func runCatchUpLoop(ctx context.Context, agent *replication.CatchUpAgent, eng *e
 			checkInAll()
 		}
 	}
+}
+
+// distributorAdapter adapts change.Agent.ProcessNow to engine.Distributor.
+type distributorAdapter struct {
+	agent *change.Agent
+}
+
+func (d distributorAdapter) ProcessNow(ctx context.Context, changeName, collection, id string) engine.DistributionResult {
+	r := d.agent.ProcessNow(ctx, changeName, collection, id)
+	return engine.DistributionResult{Complete: r.Complete, Err: r.Err}
 }

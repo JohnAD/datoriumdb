@@ -42,6 +42,9 @@ func TestComposeDegradedReplicationRecovers(t *testing.T) {
 	if created["ok"] != true {
 		t.Fatalf("expected SOT-local success even with the read-member down: %#v", created)
 	}
+	if created["distributionComplete"] != false {
+		t.Fatalf("expected distributionComplete false when the read-member is down: %#v", created)
+	}
 	note, hasNote := created["note"].(map[string]any)
 	if !hasNote {
 		t.Fatalf("expected a note naming the unacknowledged read-member: %#v", created)

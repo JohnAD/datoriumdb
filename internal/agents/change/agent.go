@@ -52,8 +52,27 @@ type Agent struct {
 	Cfg        ConfigSource
 	IDs        IDGenerator
 	Router     SearchRouter
-	Exclusion  Excluder
-	Logf       func(format string, args ...any)
+	// CachePush delivers pending cache-update work items to remote read
+	// members in one shot. Nil means only durable pending files are
+	// written for remote targets (pull agent catch-up).
+	CachePush CachePusher
+	Exclusion Excluder
+	Logf      func(format string, args ...any)
+}
+
+// CachePusher pushes one cache-update work item to a remote read/proxy
+// member. Local self-targets are applied by the change-agent directly.
+type CachePusher interface {
+	Push(ctx context.Context, targetServer string, item cache.WorkItem) error
+}
+
+// ProcessResult reports whether synchronous search/cache distribution
+// finished for one change-queue entry. Complete=false is informational;
+// Err is set only when processing failed hard enough that the queue entry
+// must remain for background retry.
+type ProcessResult struct {
+	Complete bool
+	Err      error
 }
 
 func (a *Agent) ids() IDGenerator {
@@ -67,6 +86,41 @@ func (a *Agent) logf(format string, args ...any) {
 	if a.Logf != nil {
 		a.Logf(format, args...)
 	}
+}
+
+// ProcessNow claims and processes the specific change-queue entry for
+// (change, collection, id). It is safe to call from the write path while
+// the background RunOnce loop is also running: the exclusion set and
+// .queue→.taken rename serialize ownership. Complete is true only when
+// search mutations and cache applies reached every required target.
+func (a *Agent) ProcessNow(ctx context.Context, change, collection, id string) ProcessResult {
+	cfg := a.Cfg()
+	if cfg == nil {
+		return ProcessResult{Complete: false}
+	}
+	key := collection + "/" + id
+	if a.Exclusion != nil && !a.Exclusion.TryAcquire(key) {
+		return ProcessResult{Complete: false}
+	}
+	if a.Exclusion != nil {
+		defer a.Exclusion.Release(key)
+	}
+	filename := change + "__" + collection + "__" + id + ".queue"
+	takenPath := fsstore.TakenQueuePath(a.DataDir, collection, change, id)
+	queuePath := fsstore.QueueEntryPath(a.DataDir, collection, filename)
+	ext := "queue"
+	if _, err := os.Stat(takenPath); err == nil {
+		ext = "taken"
+	} else if _, err := os.Stat(queuePath); err != nil {
+		if os.IsNotExist(err) {
+			// Already drained by a concurrent worker — treat as incomplete
+			// for this response because we cannot prove derived data landed.
+			return ProcessResult{Complete: false}
+		}
+		return ProcessResult{Complete: false, Err: err}
+	}
+	complete, _, err := a.runEntryResult(ctx, cfg, change, collection, id, filename, ext)
+	return ProcessResult{Complete: complete, Err: err}
 }
 
 // RunOnce claims and fully processes at most one change-queue entry across
@@ -114,53 +168,61 @@ func (a *Agent) RunOnce(ctx context.Context) (bool, error) {
 
 // runEntry claims (if needed) and processes one queue entry, then cleans
 // up the previous-document dotfile and the .taken marker only after
-// distribution succeeds, per AGENT-FOR-CHANGE-DISTRIBUTION.md.
+// distribution work is durably handed off, per AGENT-FOR-CHANGE-DISTRIBUTION.md.
 func (a *Agent) runEntry(ctx context.Context, cfg *config.Config, change, collection, id, filename, ext string) (bool, error) {
+	_, claimed, err := a.runEntryResult(ctx, cfg, change, collection, id, filename, ext)
+	return claimed, err
+}
+
+// runEntryResult is the shared claim/process/cleanup path used by RunOnce
+// and ProcessNow. complete is true only when every search/cache target
+// applied; a durable cache pending fallback still allows cleanup and
+// returns complete=false with err=nil. claimed is false when another
+// worker already took the queue entry.
+func (a *Agent) runEntryResult(ctx context.Context, cfg *config.Config, change, collection, id, filename, ext string) (complete, claimed bool, err error) {
 	takenPath := fsstore.TakenQueuePath(a.DataDir, collection, change, id)
 	if ext == "queue" {
 		queuePath := fsstore.QueueEntryPath(a.DataDir, collection, filename)
 		if err := os.Rename(queuePath, takenPath); err != nil {
 			if os.IsNotExist(err) {
-				// Another worker/process claimed it first.
-				return false, nil
+				return false, false, nil
 			}
-			return false, fmt.Errorf("claim %s: %w", filename, err)
+			return false, false, fmt.Errorf("claim %s: %w", filename, err)
 		}
 	}
-	// ext == "taken" means this entry was already claimed by a previous
-	// run (possibly interrupted before cleanup); resume it. Processing is
-	// idempotent, so re-running it is safe.
-	if err := a.process(ctx, cfg, change, collection, id); err != nil {
-		return true, err
+	complete, err = a.process(ctx, cfg, change, collection, id)
+	if err != nil {
+		return false, true, err
 	}
 	prevPath := fsstore.PreviousDocumentPath(a.DataDir, collection, id)
-	if err := os.Remove(prevPath); err != nil && !os.IsNotExist(err) {
-		return true, fmt.Errorf("remove previous dotfile: %w", err)
+	if remErr := os.Remove(prevPath); remErr != nil && !os.IsNotExist(remErr) {
+		return false, true, fmt.Errorf("remove previous dotfile: %w", remErr)
 	}
-	if err := os.Remove(takenPath); err != nil && !os.IsNotExist(err) {
-		return true, fmt.Errorf("remove taken marker: %w", err)
+	if remErr := os.Remove(takenPath); remErr != nil && !os.IsNotExist(remErr) {
+		return false, true, fmt.Errorf("remove taken marker: %w", remErr)
 	}
-	return true, nil
+	return complete, true, nil
 }
 
-func (a *Agent) process(ctx context.Context, cfg *config.Config, change, collection, id string) error {
+func (a *Agent) process(ctx context.Context, cfg *config.Config, change, collection, id string) (complete bool, err error) {
 	currentPath := fsstore.DocumentPath(a.DataDir, collection, id)
 	prevPath := fsstore.PreviousDocumentPath(a.DataDir, collection, id)
 	currentDoc, err := readOptionalDoc(currentPath)
 	if err != nil {
-		return fmt.Errorf("read current document: %w", err)
+		return false, fmt.Errorf("read current document: %w", err)
 	}
 	prevDoc, err := readOptionalDoc(prevPath)
 	if err != nil {
-		return fmt.Errorf("read previous document: %w", err)
+		return false, fmt.Errorf("read previous document: %w", err)
 	}
-	if err := a.distributeCache(cfg, collection, id, change, currentDoc, prevDoc); err != nil {
-		return fmt.Errorf("cache distribution: %w", err)
+	cacheComplete, err := a.distributeCache(ctx, cfg, collection, id, change, currentDoc, prevDoc)
+	if err != nil {
+		return false, fmt.Errorf("cache distribution: %w", err)
 	}
 	if err := a.distributeSearch(ctx, cfg, collection, id, prevDoc, currentDoc); err != nil {
-		return fmt.Errorf("search distribution: %w", err)
+		return false, fmt.Errorf("search distribution: %w", err)
 	}
-	return nil
+	return cacheComplete, nil
 }
 
 func readOptionalDoc(path string) (map[string]any, error) {
@@ -229,15 +291,17 @@ func bucketIndex(buckets []search.EvalResult) map[string]search.EvalResult {
 
 // distributeCache implements AGENT-FOR-CHANGE-DISTRIBUTION.md's "Cache
 // Distribution": if any collection schema declares a DatoriumCachedRef
-// field that may point at collection, queue a pending cache-update work
-// item for every candidate read server.
-func (a *Agent) distributeCache(cfg *config.Config, collection, id, change string, currentDoc, prevDoc map[string]any) error {
+// field that may point at collection, durably stage a pending cache-update
+// work item for every candidate read server, then attempt one-shot apply
+// (local for self, push for remotes). Targets that do not acknowledge keep
+// their pending file for pull-agent catch-up; that is not a hard error.
+func (a *Agent) distributeCache(ctx context.Context, cfg *config.Config, collection, id, change string, currentDoc, prevDoc map[string]any) (complete bool, err error) {
 	if !anySchemaReferencesCollection(cfg, collection) {
-		return nil
+		return true, nil
 	}
 	targets := cfg.AllReadMembers()
 	if len(targets) == 0 {
-		return nil
+		return true, nil
 	}
 	item := cache.WorkItem{
 		SourceCollection: collection,
@@ -246,7 +310,7 @@ func (a *Agent) distributeCache(cfg *config.Config, collection, id, change strin
 	}
 	opID, err := a.ids().New()
 	if err != nil {
-		return err
+		return false, err
 	}
 	item.OperationID = opID
 	switch change {
@@ -262,7 +326,7 @@ func (a *Agent) distributeCache(cfg *config.Config, collection, id, change strin
 		if currentDoc == nil {
 			// Nothing to distribute; the document may have been deleted
 			// again before this queue entry was reached.
-			return nil
+			return true, nil
 		}
 		item.AfterVersion, _ = currentDoc["#"].(string)
 		if prevDoc != nil {
@@ -270,12 +334,38 @@ func (a *Agent) distributeCache(cfg *config.Config, collection, id, change strin
 		}
 		item.Payload = currentDoc
 	}
+	complete = true
 	for _, server := range targets {
 		if err := cache.WriteWorkItem(a.DataDir, server, item); err != nil {
-			return fmt.Errorf("write pending cache update for %s: %w", server, err)
+			return false, fmt.Errorf("write pending cache update for %s: %w", server, err)
+		}
+		if server == a.ServerName {
+			if _, err := cache.Apply(a.DataDir, item); err != nil {
+				complete = false
+				a.logf("change-agent: local cache apply for %s/%s: %v", collection, id, err)
+				continue
+			}
+			if _, err := cache.DeleteWorkItem(a.DataDir, collection, server, id); err != nil {
+				complete = false
+				a.logf("change-agent: delete local pending cache update for %s/%s: %v", collection, id, err)
+			}
+			continue
+		}
+		if a.CachePush == nil {
+			complete = false
+			continue
+		}
+		if err := a.CachePush.Push(ctx, server, item); err != nil {
+			complete = false
+			a.logf("change-agent: cache push to %s for %s/%s: %v", server, collection, id, err)
+			continue
+		}
+		if _, err := cache.DeleteWorkItem(a.DataDir, collection, server, id); err != nil {
+			complete = false
+			a.logf("change-agent: delete pending cache update after push to %s: %v", server, err)
 		}
 	}
-	return nil
+	return complete, nil
 }
 
 // anySchemaReferencesCollection reports whether any collection schema has a

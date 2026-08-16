@@ -8,13 +8,14 @@
   machine.
 - **Read-your-write is guaranteed only on the SOT member.** A machine serving
   both SOT and READ roles for a shard always returns current data.
-- **Read members lag.** When SOT and READ roles are split across machines,
-  read members catch up asynchronously (default check-in every 10 seconds). A
-  read member can briefly serve a pre-write view.
-- **Searches and cached summaries are eventually correct.** They are updated
-  by a background change-agent after the document write commits. Never assume
-  a `search` result or a `cacheSummaries` value reflects a write that just
-  returned.
+- **Read members lag unless `distributionComplete` is true.** When SOT and
+  READ roles are split across machines, the write path makes one live delivery
+  attempt for documents, searches, and cached summaries. If any target does
+  not acknowledge, the success response still returns `ok: true` with
+  `distributionComplete: false` (and possibly a replication `note`); unread
+  members catch up asynchronously.
+- **`distributionComplete` is a hint, never an error.** Clients may use it to
+  skip polling when true, but must not treat false as a failed write.
 - **Writes are version-checked.** `patch` and `delete` require the exact
   current `#` version; a stale version is refused with `versionMismatch`. See
   [Atomic Updates and Batching](atomic-updates.md).
@@ -26,7 +27,8 @@ When the SOT member accepts a write it:
 1. commits the change to local source-of-truth storage,
 2. makes one live delivery attempt to each assigned read/proxy member,
 3. records a pending-write entry for any member that did not acknowledge,
-4. returns `ok: true` to the client.
+4. attempts synchronous search and cache distribution for the same document,
+5. returns `ok: true` with `distributionComplete` summarizing steps 2–4.
 
 If step 2 left anyone out, the success response includes a `note` object
 naming `acknowledged` and `unacknowledged` members. The write is still

@@ -12,7 +12,7 @@ Test layers (see `README.md` "Testing" for how to run each):
 
 | Requirement | Doc | Test IDs / suites | Status |
 | --- | --- | --- | --- |
-| Access-language CRUD | ACCESS-LANGUAGE.md | unit: `internal/engine`, `internal/accesslang`; contract: `test/contract` create/read/patch/delete + error-path golden envelopes; integration: `TestSingleNodeCRUDLifecycle` | covered |
+| Access-language CRUD | ACCESS-LANGUAGE.md | unit: `internal/engine`, `internal/accesslang`; contract: `test/contract` create/read/patch/delete + error-path golden envelopes (`distributionComplete` on write success); integration: `TestSingleNodeCRUDLifecycle` | covered |
 | HTTP command transport | ACCESS-LANGUAGE.md, LOCAL-ARCHITECTURE.md | integration: `TestSingleNodeCRUDLifecycle`, `TestSingleNodeUnauthenticatedCommandRefused`; compose: `TestComposeSingleNodeCRUD` | covered |
 | 8-bit shard slot via CRC32 | CONVENTIONS.md, SHARDING.md | unit: `internal/shard`; compose: `TestComposeFiveShardCRUDAcrossShardsAndWrongMachine` (`serverForSlot`) | covered |
 | Document IDs (periods allowed; no leading `.`) | CONVENTIONS.md, SHARDING.md | unit: `internal/idgen`, `internal/fsstore` (`SafeID`), engine CRUD with period IDs; shard prefix uses six positions after optional leading periods are rejected | covered |

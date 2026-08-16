@@ -57,6 +57,7 @@ func (s *HTTPServer) Handler() http.Handler {
 	mux.HandleFunc("GET /datoriumdb/v1/sys/pending-document-write-work-items/{itemID}", s.withAuth(s.handleFetchPendingDocumentWrite))
 	mux.HandleFunc("DELETE /datoriumdb/v1/sys/pending-document-write-work-items/{itemID}", s.withAuth(s.handleCompletePendingDocumentWrite))
 	mux.HandleFunc("POST /datoriumdb/v1/sys/apply-search-result-write", s.withAuth(s.handleApplySearchResultWrite))
+	mux.HandleFunc("POST /datoriumdb/v1/sys/apply-cache-update", s.withAuth(s.handleApplyCacheUpdate))
 	mux.HandleFunc("POST /datoriumdb/v1/sys/pending-cache-update-work-items", s.withAuth(s.handleListPendingCacheUpdates))
 	mux.HandleFunc("GET /datoriumdb/v1/sys/pending-cache-update-work-items/{itemID}", s.withAuth(s.handleFetchPendingCacheUpdate))
 	mux.HandleFunc("DELETE /datoriumdb/v1/sys/pending-cache-update-work-items/{itemID}", s.withAuth(s.handleCompletePendingCacheUpdate))

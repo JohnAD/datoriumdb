@@ -52,7 +52,9 @@ create {collection} {id} {content}
 The client always supplies the ID (mint a ULID); the server never generates
 one. If `{content}` omits the `$` schema marker, the server fills in the
 collection's current schema version. On success the response includes the new
-document version `#`.
+document version `#` and informational `distributionComplete` (true when
+document, search, and cache distribution all finished in the one-shot
+window; false is not an error).
 
 ### read
 
