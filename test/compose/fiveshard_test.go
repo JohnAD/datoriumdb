@@ -77,7 +77,7 @@ func TestComposeFiveShardCRUDAcrossShardsAndWrongMachine(t *testing.T) {
 	for owner, id := range idsByServer {
 		port := fiveShardHostPorts[owner]
 		baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-		created, err := testutil.PostCommand(ctx, baseURL, token, fmt.Sprintf(`create Movies %s {$: Movies:0, title: "Shard Owner Test"}`, id))
+		created, err := testutil.PostCommand(ctx, baseURL, token, "create", "Movies", id, map[string]any{"$": "Movies:0", "title": "Shard Owner Test"})
 		if err != nil {
 			t.Fatalf("create on %s: %v", owner, err)
 		}
@@ -96,7 +96,7 @@ func TestComposeFiveShardCRUDAcrossShardsAndWrongMachine(t *testing.T) {
 			// document collision to worry about, and the ID's shard
 			// slot (and therefore its correct owner) does not change.
 			otherBaseURL := fmt.Sprintf("http://127.0.0.1:%d", otherPort)
-			refused, err := testutil.PostCommand(ctx, otherBaseURL, token, fmt.Sprintf(`create Movies %s {$: Movies:0, title: "Wrong Machine Test"}`, id))
+			refused, err := testutil.PostCommand(ctx, otherBaseURL, token, "create", "Movies", id, map[string]any{"$": "Movies:0", "title": "Wrong Machine Test"})
 			if err != nil {
 				t.Fatalf("create on wrong owner %s: %v", otherOwner, err)
 			}

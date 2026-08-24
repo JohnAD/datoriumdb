@@ -63,7 +63,7 @@ func TestSIGKILLDuringConcurrentWritesPreservesDurability(t *testing.T) {
 				}
 				title := fmt.Sprintf("Writer %d Doc %d", w, i)
 				id := fmt.Sprintf("01CRASHW%02dDOC%014d", w, i)
-				res, err := testutil.PostCommand(ctx, srv.BaseURL, token, fmt.Sprintf(`create Movies %s {$: Movies:0, title: %q}`, id, title))
+				res, err := testutil.PostCommand(ctx, srv.BaseURL, token, "create", "Movies", id, map[string]any{"$": "Movies:0", "title": title})
 				if err != nil {
 					return // server likely just got killed
 				}
@@ -102,7 +102,7 @@ func TestSIGKILLDuringConcurrentWritesPreservesDurability(t *testing.T) {
 	// previously confirmed document is still readable.
 	srv.Restart(t)
 	for _, id := range idsBeforeKill {
-		res, err := testutil.PostCommand(ctx, srv.BaseURL, token, `read Movies `+id+` {}`)
+		res, err := testutil.PostCommand(ctx, srv.BaseURL, token, "read", "Movies", id, map[string]any{})
 		if err != nil {
 			t.Fatalf("read %s after restart: %v", id, err)
 		}
@@ -134,7 +134,7 @@ func TestKilledReadMemberCatchesUpAfterRestart(t *testing.T) {
 	// Hard-kill the read-member while it is otherwise healthy.
 	srvB.Kill(t)
 
-	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Read Member Was Down"}`)
+	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, "create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "Read Member Was Down"})
 	if err != nil {
 		t.Fatalf("create while read-member is down: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestKilledReadMemberCatchesUpAfterRestart(t *testing.T) {
 	srvB.Restart(t)
 
 	testutil.PollUntilErr(t, 10*time.Second, 100*time.Millisecond, func() error {
-		res, err := testutil.PostCommand(ctx, srvB.BaseURL, token, `read Movies `+id+` {}`)
+		res, err := testutil.PostCommand(ctx, srvB.BaseURL, token, "read", "Movies", id, map[string]any{})
 		if err != nil {
 			return err
 		}

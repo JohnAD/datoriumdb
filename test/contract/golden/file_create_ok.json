@@ -1,0 +1,13 @@
+{
+  "byteSize": 3,
+  "collection": "Movies",
+  "command": "fileCreate",
+  "contentType": "image/png",
+  "distributionComplete": true,
+  "filename": "poster.png",
+  "id": "fixedidfile01",
+  "ok": true,
+  "operationId": "01FIXEDFILEOP000000000001",
+  "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+  "version": "<ID:1>"
+}

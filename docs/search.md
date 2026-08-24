@@ -8,14 +8,28 @@ behind a just-committed write (see [Consistency Model](consistency.md)).
 
 ## Running a search
 
-```text
-search {collection} {searchName} {search-parms}
+```json
+{
+  "command": "search",
+  "target": "{collection}",
+  "parameter": "{searchName}",
+  "detail": { "...": "search-parms" }
+}
 ```
 
 Example:
 
-```text
-search Movies byReleasedGenre {status: released, useGenreFilter: true, genre: scifi}
+```json
+{
+  "command": "search",
+  "target": "Movies",
+  "parameter": "byReleasedGenre",
+  "detail": {
+    "status": "released",
+    "useGenreFilter": true,
+    "genre": "scifi"
+  }
+}
 ```
 
 Success response:

@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"github.com/JohnAD/datoriumdb/internal/accesslang"
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/replication"
@@ -13,9 +13,9 @@ import (
 // as the change-agent would for a matching document, refuse the command if
 // this server does not serve that search shard, and otherwise return the
 // sorted document IDs from the stored matches.json.
-func (e *Engine) search(cmd accesslang.Command, detail map[string]any) envelope.Result {
-	collection := cmd.Target
-	searchName := cmd.Parm
+func (e *Engine) search(req commandreq.Request, detail map[string]any) envelope.Result {
+	collection := req.Target
+	searchName := req.Parameter
 	fail := func(code, message string) envelope.Result {
 		return envelope.Fail(map[string]any{
 			"command":    "search",

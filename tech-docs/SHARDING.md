@@ -42,6 +42,9 @@ In this model:
 
 Writes go to the `SHARD_SOT_MEMBER` for the target document's shard. Reads and searches go to an assigned `SHARD_READ_MEMBER`, preferring a local dual-role server when available. `PROXY_READ_MEMBER` servers receive replicated data but are not normal smart-client read targets.
 
+Binary attachments use the same parent-document shard routing (PUT/DELETE to
+SOT, GET/list to READ). See [BINARY-FILES.md](BINARY-FILES.md).
+
 Full-replica analysis mirrors remain a later option and are not required for MVP.
 
 ## Machine Roles

@@ -34,18 +34,21 @@ The default route prefix for DatoriumDB servers is `/datoriumdb/v1`. After authe
 
 ## Command Handling
 
-The server accepts DatoriumDB access-language commands and returns command result envelopes.
+The server accepts DatoriumDB JSON commands and returns command result envelopes.
 
 The MVP HTTP transport is:
 
 ```text
 POST /datoriumdb/v1/command
-Content-Type: text/plain; charset=utf-8
+Content-Type: application/json
 ```
 
-The request body is one access-language command. The response is a JSON result envelope. See [ACCESS-LANGUAGE.md](ACCESS-LANGUAGE.md).
-
-The command layer should remain separate from the transport layer. This keeps the access language reusable if later versions add other transports.
+The request body is one four-field JSON object (`command`, `target`,
+`parameter`, `detail`). File create/update use `multipart/form-data` with the
+same JSON object as a `command` part plus a streamed `content` part. The
+response is a JSON result envelope (except successful `fileRead`, which streams
+raw bytes). See [ACCESS-LANGUAGE.md](ACCESS-LANGUAGE.md) and
+[BINARY-FILES.md](BINARY-FILES.md).
 
 Commands should follow the sharding path even when every shard maps to the same machine:
 

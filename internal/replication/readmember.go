@@ -1,6 +1,7 @@
 package replication
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -21,10 +22,15 @@ type ReadMemberState struct {
 	failedCheckins map[string]int
 	staleSOT       map[string]bool
 	pendingDocs    map[string]bool // key: collection + "/" + documentID
+	pendingFiles   map[string]bool // key: collection + "/" + documentID + "/" + filename
 }
 
 func docKey(collection, documentID string) string {
 	return collection + "/" + documentID
+}
+
+func fileKey(collection, documentID, filename string) string {
+	return collection + "/" + documentID + "/" + filename
 }
 
 func (s *ReadMemberState) init() {
@@ -36,6 +42,9 @@ func (s *ReadMemberState) init() {
 	}
 	if s.pendingDocs == nil {
 		s.pendingDocs = map[string]bool{}
+	}
+	if s.pendingFiles == nil {
+		s.pendingFiles = map[string]bool{}
 	}
 }
 
@@ -110,4 +119,46 @@ func (s *ReadMemberState) IsPending(collection, documentID string) bool {
 	defer s.mu.Unlock()
 	s.init()
 	return s.pendingDocs[docKey(collection, documentID)]
+}
+
+// MarkPendingFile flags one attachment as known out of date.
+func (s *ReadMemberState) MarkPendingFile(collection, documentID, filename string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	s.pendingFiles[fileKey(collection, documentID, filename)] = true
+}
+
+// ClearPendingFile clears one attachment pending flag.
+func (s *ReadMemberState) ClearPendingFile(collection, documentID, filename string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	delete(s.pendingFiles, fileKey(collection, documentID, filename))
+}
+
+// IsPendingFile reports whether a specific attachment is known stale.
+// When filename is empty, returns false (use HasPendingFilesForDoc for list).
+func (s *ReadMemberState) IsPendingFile(collection, documentID, filename string) bool {
+	if filename == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	return s.pendingFiles[fileKey(collection, documentID, filename)]
+}
+
+// HasPendingFilesForDoc reports whether any attachment for the document is pending.
+func (s *ReadMemberState) HasPendingFilesForDoc(collection, documentID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.init()
+	prefix := docKey(collection, documentID) + "/"
+	for k := range s.pendingFiles {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+	}
+	return false
 }

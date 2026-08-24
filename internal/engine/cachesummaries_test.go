@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JohnAD/datoriumdb/internal/agents/cache"
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 )
 
 const engineReviewsSchema = `{
@@ -51,13 +52,13 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000001 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "great!"}`)
+	created := eng.Execute(commandreq.Must("create", "Reviews", "01TESTREVIEW00000000000001", map[string]any{"$": "Reviews:0", "movieRef": "@@__Movies__movie1", "text": "great!"}))
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
 	id, _ := created["id"].(string)
 
-	read := eng.Execute(`read Reviews ` + id + ` {cacheSummaries: true}`)
+	read := eng.Execute(commandreq.Must("read", "Reviews", id, map[string]any{"cacheSummaries": true}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
@@ -83,13 +84,13 @@ func TestReadCacheSummariesResolvesExistingCache(t *testing.T) {
 
 func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000002 {$: Reviews:0, movieRef: "@@__Movies__unknownMovie", text: "x"}`)
+	created := eng.Execute(commandreq.Must("create", "Reviews", "01TESTREVIEW00000000000002", map[string]any{"$": "Reviews:0", "movieRef": "@@__Movies__unknownMovie", "text": "x"}))
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
 	id, _ := created["id"].(string)
 
-	read := eng.Execute(`read Reviews ` + id + ` {cacheSummaries: true}`)
+	read := eng.Execute(commandreq.Must("read", "Reviews", id, map[string]any{"cacheSummaries": true}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
@@ -115,9 +116,9 @@ func TestReadCacheSummariesCreatesLostReferenceStub(t *testing.T) {
 
 func TestReadWithoutCacheSummariesFlagOmitsField(t *testing.T) {
 	eng := testEngineWithReviews(t)
-	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000003 {$: Reviews:0, movieRef: "@@__Movies__movie1", text: "x"}`)
+	created := eng.Execute(commandreq.Must("create", "Reviews", "01TESTREVIEW00000000000003", map[string]any{"$": "Reviews:0", "movieRef": "@@__Movies__movie1", "text": "x"}))
 	id, _ := created["id"].(string)
-	read := eng.Execute(`read Reviews ` + id + ` {}`)
+	read := eng.Execute(commandreq.Must("read", "Reviews", id, map[string]any{}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
@@ -165,12 +166,12 @@ func TestReadCacheSummariesFindsNestedCachedRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := eng.Execute(`create Reviews 01TESTREVIEW00000000000004 {$: Reviews:0, text: "x", meta: {movieRef: "@@__Movies__movieNested"}}`)
+	created := eng.Execute(commandreq.Must("create", "Reviews", "01TESTREVIEW00000000000004", map[string]any{"$": "Reviews:0", "text": "x", "meta": map[string]any{"movieRef": "@@__Movies__movieNested"}}))
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
 	id, _ := created["id"].(string)
-	read := eng.Execute(`read Reviews ` + id + ` {cacheSummaries: true}`)
+	read := eng.Execute(commandreq.Must("read", "Reviews", id, map[string]any{"cacheSummaries": true}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}

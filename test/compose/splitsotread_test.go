@@ -30,7 +30,7 @@ func TestComposeSplitSOTReadRouting(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "compose-split-sot-read-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Split SOT Read Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "Split SOT Read Test"})
 	if err != nil {
 		t.Fatalf("create on SOT: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestComposeSplitSOTReadRouting(t *testing.T) {
 	id, _ := created["id"].(string)
 
 	testutil.PollUntilErr(t, 15*time.Second, 250*time.Millisecond, func() error {
-		res, err := testutil.PostCommand(ctx, baseB, token, `read Movies `+id+` {}`)
+		res, err := testutil.PostCommand(ctx, baseB, token, "read", "Movies", id, map[string]any{})
 		if err != nil {
 			return err
 		}
@@ -50,7 +50,7 @@ func TestComposeSplitSOTReadRouting(t *testing.T) {
 		return nil
 	})
 
-	refused, err := testutil.PostCommand(ctx, baseB, token, `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Should Be Refused"}`)
+	refused, err := testutil.PostCommand(ctx, baseB, token, "create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "Should Be Refused"})
 	if err != nil {
 		t.Fatalf("create on read-member: %v", err)
 	}

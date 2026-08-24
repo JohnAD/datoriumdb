@@ -135,9 +135,9 @@ one.
 TOKEN=...   # from datoriumctl auth token issue
 
 curl -sS -X POST http://127.0.0.1:8080/datoriumdb/v1/command \
-  -H "Content-Type: text/plain; charset=utf-8" \
+  -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  --data 'create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}'
+  --data '{"command":"create","target":"Movies","parameter":"01TESTMOVIES00000000000001","detail":{"$":"Movies:0","title":"The Matrix","releaseYear":1999}}'
 ```
 
 ## Multi-node setup

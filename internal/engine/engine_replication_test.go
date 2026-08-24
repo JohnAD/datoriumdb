@@ -3,17 +3,18 @@ package engine
 import (
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 )
 
 func TestCreateRetrySameIDReturnsDocumentExists(t *testing.T) {
 	eng := testEngine(t)
 	id := "01TESTCREATE0000000000001"
-	first := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "x"}`)
+	first := eng.Execute(commandreq.Must("create", "Movies", id, map[string]any{"$": "Movies:0", "title": "x"}))
 	if first["ok"] != true {
 		t.Fatalf("first create failed: %#v", first)
 	}
-	second := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "x"}`)
+	second := eng.Execute(commandreq.Must("create", "Movies", id, map[string]any{"$": "Movies:0", "title": "x"}))
 	if second["ok"] != false {
 		t.Fatalf("retried create with the same id must fail: %#v", second)
 	}
@@ -24,7 +25,7 @@ func TestCreateRetrySameIDReturnsDocumentExists(t *testing.T) {
 
 func TestCreateRejectsNullID(t *testing.T) {
 	eng := testEngine(t)
-	res := eng.Execute(`create Movies null {$: Movies:0, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "null", map[string]any{"$": "Movies:0", "title": "x"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}
@@ -35,11 +36,16 @@ func TestCreateRejectsNullID(t *testing.T) {
 
 func TestPatchRetryAfterSuccessReturnsVersionMismatch(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTPATCH00000000000001 {$: Movies:0, title: "x", status: unreleased}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTPATCH00000000000001", map[string]any{"$": "Movies:0", "title": "x", "status": "unreleased"}))
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
-	patchCmd := `patch Movies ` + id + ` {operationId: 01OPTESTPATCH000000000001, $: Movies:0, #: ` + ver + `, RFC6902: [{op: replace, path: /status, value: released}]}`
+	patchCmd := commandreq.Must("patch", "Movies", id, map[string]any{
+		"operationId": "01OPTESTPATCH000000000001",
+		"$":           "Movies:0",
+		"#":           ver,
+		"RFC6902":     []any{map[string]any{"op": "replace", "path": "/status", "value": "released"}},
+	})
 	first := eng.Execute(patchCmd)
 	if first["ok"] != true {
 		t.Fatalf("first patch failed: %#v", first)
@@ -57,11 +63,14 @@ func TestPatchRetryAfterSuccessReturnsVersionMismatch(t *testing.T) {
 
 func TestDeleteRetryAfterGoneReturnsDocumentNotFound(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTDELETE0000000000001 {$: Movies:0, title: "x"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTDELETE0000000000001", map[string]any{"$": "Movies:0", "title": "x"}))
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
-	deleteCmd := `delete Movies ` + id + ` {operationId: 01OPTESTDELETE00000000001, #: ` + ver + `}`
+	deleteCmd := commandreq.Must("delete", "Movies", id, map[string]any{
+		"operationId": "01OPTESTDELETE00000000001",
+		"#":           ver,
+	})
 	first := eng.Execute(deleteCmd)
 	if first["ok"] != true {
 		t.Fatalf("first delete failed: %#v", first)
@@ -80,8 +89,8 @@ func TestDeleteRetryAfterGoneReturnsDocumentNotFound(t *testing.T) {
 
 func TestDistinctCreateIDsAreIndependent(t *testing.T) {
 	eng := testEngine(t)
-	first := eng.Execute(`create Movies 01TESTFRESH0000000000001A {$: Movies:0, title: "x"}`)
-	second := eng.Execute(`create Movies 01TESTFRESH0000000000001B {$: Movies:0, title: "y"}`)
+	first := eng.Execute(commandreq.Must("create", "Movies", "01TESTFRESH0000000000001A", map[string]any{"$": "Movies:0", "title": "x"}))
+	second := eng.Execute(commandreq.Must("create", "Movies", "01TESTFRESH0000000000001B", map[string]any{"$": "Movies:0", "title": "y"}))
 	if first["ok"] != true || second["ok"] != true {
 		t.Fatalf("expected both creates to succeed: %#v / %#v", first, second)
 	}
@@ -97,7 +106,7 @@ func TestReadRefusedForStaleSOTCheckins(t *testing.T) {
 
 	// Before any failed check-ins, routing lets the read through (and it
 	// fails with documentNotFound, not staleness).
-	res := eng.Execute(`read Movies ` + lowID + ` {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	if code := firstErrorCode(res); code != "documentNotFound" {
 		t.Fatalf("expected documentNotFound before staleness, got %#v", res)
 	}
@@ -105,7 +114,7 @@ func TestReadRefusedForStaleSOTCheckins(t *testing.T) {
 	eng.ReadState.RecordCheckinFailure("serverA")
 	eng.ReadState.RecordCheckinFailure("serverA")
 
-	res = eng.Execute(`read Movies ` + lowID + ` {}`)
+	res = eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected reads to be refused once the read-member is stale for its SOT: %#v", res)
 	}
@@ -120,7 +129,7 @@ func TestReadRefusedForPendingDocument(t *testing.T) {
 	eng.ReadState = &replication.ReadMemberState{}
 	eng.ReadState.MarkPending("Movies", lowID)
 
-	res := eng.Execute(`read Movies ` + lowID + ` {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected read to be refused for a known-stale document: %#v", res)
 	}
@@ -129,7 +138,7 @@ func TestReadRefusedForPendingDocument(t *testing.T) {
 	}
 
 	eng.ReadState.ClearPending("Movies", lowID)
-	res = eng.Execute(`read Movies ` + lowID + ` {}`)
+	res = eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	if code := firstErrorCode(res); code != "documentNotFound" {
 		t.Fatalf("expected documentNotFound once no longer pending, got %#v", res)
 	}

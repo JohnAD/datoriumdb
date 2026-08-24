@@ -1,0 +1,14 @@
+{
+  "collection": "Movies",
+  "command": "fileCreate",
+  "errors": [
+    {
+      "actual": "<ID:1>",
+      "code": "fileExists",
+      "message": "file already exists; provide If-Match with the current file version to update"
+    }
+  ],
+  "filename": "poster.png",
+  "id": "fixedidfile02",
+  "ok": false
+}

@@ -1,5 +1,5 @@
 // Package server exposes DatoriumDB's HTTP transport: establishment reads,
-// access-language commands, machine-token issuance, historic schema
+// JSON/multipart public commands, machine-token issuance, historic schema
 // retrieval, health/readiness probes, and a server-to-server /sys sample
 // endpoint. See tech-docs/LOCAL-ARCHITECTURE.md, AUTHENTICATION.md, and
 // ESTABLISHMENT-CONFIG.md.
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	maxCommandBodyBytes     = 1 << 20 // 1 MiB access-language command body
+	maxCommandBodyBytes     = 1 << 20 // 1 MiB JSON command / multipart command-part limit
 	maxAuthRequestBodyBytes = 16 << 10
 )
 
@@ -61,6 +61,7 @@ func (s *HTTPServer) Handler() http.Handler {
 	mux.HandleFunc("POST /datoriumdb/v1/sys/pending-cache-update-work-items", s.withAuth(s.handleListPendingCacheUpdates))
 	mux.HandleFunc("GET /datoriumdb/v1/sys/pending-cache-update-work-items/{itemID}", s.withAuth(s.handleFetchPendingCacheUpdate))
 	mux.HandleFunc("DELETE /datoriumdb/v1/sys/pending-cache-update-work-items/{itemID}", s.withAuth(s.handleCompletePendingCacheUpdate))
+	s.registerSysFileRoutes(mux)
 	return mux
 }
 
@@ -93,28 +94,6 @@ func (s *HTTPServer) handleEstablish(w http.ResponseWriter, _ *http.Request, _ a
 	}
 	fields := s.Engine.Cfg.EstablishDocument()
 	writeJSON(w, envelope.OK(fields))
-}
-
-func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
-	if !isPlainTextUTF8(r.Header.Get("Content-Type")) {
-		writeJSON(w, envelope.Fail(nil, envelope.Error{
-			Code:    "contentTypeRequired",
-			Message: "Content-Type must be text/plain; charset=utf-8",
-		}))
-		return
-	}
-	body, ferr := readBodyLimited(w, r, maxCommandBodyBytes)
-	if ferr != nil {
-		writeJSON(w, envelope.Fail(nil, *ferr))
-		return
-	}
-	if s.Engine.Cfg == nil {
-		if err := s.Engine.Reload(); err != nil {
-			writeJSON(w, envelope.Fail(nil, envelope.Error{Code: "configError", Message: err.Error()}))
-			return
-		}
-	}
-	writeJSON(w, s.Engine.Execute(string(body)))
 }
 
 func (s *HTTPServer) handleSchemaHistory(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
@@ -519,17 +498,6 @@ func toEnvelopeError(err error) envelope.Error {
 }
 
 // --- request helpers ---------------------------------------------------------
-
-func isPlainTextUTF8(contentType string) bool {
-	mt, params, err := mime.ParseMediaType(contentType)
-	if err != nil || mt != "text/plain" {
-		return false
-	}
-	if charset, ok := params["charset"]; ok && !strings.EqualFold(charset, "utf-8") {
-		return false
-	}
-	return true
-}
 
 func isJSONContentType(contentType string) bool {
 	mt, _, err := mime.ParseMediaType(contentType)

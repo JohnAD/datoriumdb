@@ -27,7 +27,7 @@ func TestComposeSingleNodeCRUD(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "compose-single-node-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseURL, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Compose Smoke Test"}`)
+	created, err := testutil.PostCommand(ctx, baseURL, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "Compose Smoke Test"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestComposeSingleNodeCRUD(t *testing.T) {
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 
-	read, err := testutil.PostCommand(ctx, baseURL, token, `read Movies `+id+` {}`)
+	read, err := testutil.PostCommand(ctx, baseURL, token, "read", "Movies", id, map[string]any{})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestComposeSingleNodeCRUD(t *testing.T) {
 		t.Fatalf("expected read to succeed: %#v", read)
 	}
 
-	patched, err := testutil.PostCommand(ctx, baseURL, token, `patch Movies `+id+` {$: Movies:0, #: `+ver+`, RFC6902: [{op: add, path: /status, value: released}]}`)
+	patched, err := testutil.PostCommand(ctx, baseURL, token, "patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "add", "path": "/status", "value": "released"}}})
 	if err != nil {
 		t.Fatalf("patch: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestComposeSingleNodeCRUD(t *testing.T) {
 	versions, _ := patched["versions"].(map[string]any)
 	afterVer, _ := versions["after"].(string)
 
-	deleted, err := testutil.PostCommand(ctx, baseURL, token, `delete Movies `+id+` {#: `+afterVer+`}`)
+	deleted, err := testutil.PostCommand(ctx, baseURL, token, "delete", "Movies", id, map[string]any{"#": afterVer})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}

@@ -1,16 +1,15 @@
 package engine
 
 import (
-	"github.com/JohnAD/datoriumdb/internal/accesslang"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/ojson"
 )
 
 // canonicalCreateDocument builds on-disk document bytes from the original
-// access-language detail text (OJSON, order-preserving) plus assigned
+// JSON detail object (OJSON, order-preserving) plus assigned
 // database-owned metadata, then applies schema field order.
-func canonicalCreateDocument(schemaRaw []byte, detailText, id, marker, version string) ([]byte, error) {
-	doc, err := accesslang.ParseDetailValue(detailText)
+func canonicalCreateDocument(schemaRaw []byte, detailJSON []byte, id, marker, version string) ([]byte, error) {
+	doc, err := ojson.ReadBytesNoSchema(detailJSON)
 	if err != nil {
 		return nil, err
 	}

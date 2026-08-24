@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -187,15 +189,86 @@ func WaitForHealth(t testing.TB, baseURL string, timeout time.Duration) {
 	})
 }
 
-// PostCommand sends an access-language command to POST /datoriumdb/v1/command
+// PostCommand sends a four-field JSON command to POST /datoriumdb/v1/command
 // on baseURL, authenticated with bearerToken (may be empty), and returns the
-// decoded envelope.
-func PostCommand(ctx context.Context, baseURL, bearerToken, command string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/datoriumdb/v1/command", strings.NewReader(command))
+// decoded envelope. detail must be a JSON object (use map[string]any{} for empty).
+func PostCommand(ctx context.Context, baseURL, bearerToken, command, target, parameter string, detail any) (map[string]any, error) {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	body, err := json.Marshal(map[string]any{
+		"command":   command,
+		"target":    target,
+		"parameter": parameter,
+		"detail":    detail,
+	})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/datoriumdb/v1/command", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := HTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode response (status %d): %w", resp.StatusCode, err)
+	}
+	return out, nil
+}
+
+// PostMultipartCommand uploads a file via multipart command + content parts.
+func PostMultipartCommand(ctx context.Context, baseURL, bearerToken, command, target, parameter string, detail any, contentType string, content io.Reader) (map[string]any, error) {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	cmdJSON, err := json.Marshal(map[string]any{
+		"command":   command,
+		"target":    target,
+		"parameter": parameter,
+		"detail":    detail,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	cmdPart, err := mw.CreateFormField("command")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := cmdPart.Write(cmdJSON); err != nil {
+		return nil, err
+	}
+	partHdr := textproto.MIMEHeader{}
+	partHdr.Set("Content-Disposition", `form-data; name="content"; filename="blob"`)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	partHdr.Set("Content-Type", contentType)
+	contentPart, err := mw.CreatePart(partHdr)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(contentPart, content); err != nil {
+		return nil, err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/datoriumdb/v1/command", &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if bearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	}

@@ -36,7 +36,7 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "integration-test-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, srvA.BaseURL, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Arrival", releaseYear: 2016}`)
+	created, err := testutil.PostCommand(ctx, srvA.BaseURL, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "Arrival", "releaseYear": 2016})
 	if err != nil {
 		t.Fatalf("create on SOT: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	})
 
 	// Reads route to the assigned SHARD_READ_MEMBER (serverB).
-	readFromB, err := testutil.PostCommand(ctx, srvB.BaseURL, token, `read Movies `+id+` {}`)
+	readFromB, err := testutil.PostCommand(ctx, srvB.BaseURL, token, "read", "Movies", id, map[string]any{})
 	if err != nil {
 		t.Fatalf("read from serverB: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestTwoNodeBootstrapReplicationAndRouting(t *testing.T) {
 	// Writes sent to serverB (not the SOT) are refused with wrongMachine.
 	// Clients must refresh establishment and re-route locally; the bounce
 	// does not include retry-target hints.
-	wrongMachine, err := testutil.PostCommand(ctx, srvB.BaseURL, token, `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Should Not Land Here"}`)
+	wrongMachine, err := testutil.PostCommand(ctx, srvB.BaseURL, token, "create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "Should Not Land Here"})
 	if err != nil {
 		t.Fatalf("create on read-member: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestReadMemberRestartRecoversReplicatedData(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "integration-test-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, `create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "Restart Recovery"}`)
+	created, err := testutil.PostCommand(ctx, "http://"+topo.ServerAAddr, token, "create", "Movies", "01TESTMOVIES00000000000003", map[string]any{"$": "Movies:0", "title": "Restart Recovery"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestReadMemberRestartRecoversReplicatedData(t *testing.T) {
 	srvB.Stop()
 	srvB.Restart(t)
 
-	readAfterRestart, err := testutil.PostCommand(ctx, srvB.BaseURL, token, `read Movies `+id+` {}`)
+	readAfterRestart, err := testutil.PostCommand(ctx, srvB.BaseURL, token, "read", "Movies", id, map[string]any{})
 	if err != nil {
 		t.Fatalf("read after restart: %v", err)
 	}

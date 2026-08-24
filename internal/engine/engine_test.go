@@ -8,13 +8,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
 func TestCreateReadPatchDelete(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999, status: released}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "The Matrix", "releaseYear": 1999, "status": "released"}))
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -27,12 +28,12 @@ func TestCreateReadPatchDelete(t *testing.T) {
 	if strings.Contains(string(raw), "operationId") {
 		t.Fatalf("operationId must not be persisted: %s", raw)
 	}
-	read := eng.Execute(`read Movies ` + id + ` {extraFields: true}`)
+	read := eng.Execute(commandreq.Must("read", "Movies", id, map[string]any{"extraFields": true}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
 	ver, _ := created["#"].(string)
-	patched := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: replace, path: /status, value: archived}]}`)
+	patched := eng.Execute(commandreq.Must("patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "replace", "path": "/status", "value": "archived"}}}))
 	if patched["ok"] != true {
 		t.Fatalf("patch failed: %#v", patched)
 	}
@@ -42,7 +43,7 @@ func TestCreateReadPatchDelete(t *testing.T) {
 	}
 	versions, _ := patched["versions"].(map[string]any)
 	after, _ := versions["after"].(string)
-	deleted := eng.Execute(`delete Movies ` + id + ` {#: ` + after + `}`)
+	deleted := eng.Execute(commandreq.Must("delete", "Movies", id, map[string]any{"#": after}))
 	if deleted["ok"] != true {
 		t.Fatalf("delete failed: %#v", deleted)
 	}
@@ -50,14 +51,14 @@ func TestCreateReadPatchDelete(t *testing.T) {
 
 func TestInvalidDocumentID(t *testing.T) {
 	eng := testEngine(t)
-	res := eng.Execute(`create Movies ../evil {$: Movies:0, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "../evil", map[string]any{"$": "Movies:0", "title": "x"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}
 	if code := firstErrorCode(res); code != "invalidDocumentId" {
 		t.Fatalf("unexpected error: %#v", res)
 	}
-	res = eng.Execute(`create Movies .hidden {$: Movies:0, title: "x"}`)
+	res = eng.Execute(commandreq.Must("create", "Movies", ".hidden", map[string]any{"$": "Movies:0", "title": "x"}))
 	if res["ok"] != false || firstErrorCode(res) != "invalidDocumentId" {
 		t.Fatalf("expected leading-dot ID rejected: %#v", res)
 	}
@@ -66,7 +67,7 @@ func TestInvalidDocumentID(t *testing.T) {
 func TestCreateReadPatchDeleteWithPeriodDocumentID(t *testing.T) {
 	eng := testEngine(t)
 	id := "01TESTMOVIES00000000000001.settings"
-	created := eng.Execute(`create Movies ` + id + ` {$: Movies:0, title: "Settings Doc", releaseYear: 1999, status: released}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", id, map[string]any{"$": "Movies:0", "title": "Settings Doc", "releaseYear": 1999, "status": "released"}))
 	if created["ok"] != true {
 		t.Fatalf("create failed: %#v", created)
 	}
@@ -77,18 +78,18 @@ func TestCreateReadPatchDeleteWithPeriodDocumentID(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
-	read := eng.Execute(`read Movies ` + id + ` {}`)
+	read := eng.Execute(commandreq.Must("read", "Movies", id, map[string]any{}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
 	ver, _ := created["#"].(string)
-	patched := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: replace, path: /status, value: archived}]}`)
+	patched := eng.Execute(commandreq.Must("patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "replace", "path": "/status", "value": "archived"}}}))
 	if patched["ok"] != true {
 		t.Fatalf("patch failed: %#v", patched)
 	}
 	versions, _ := patched["versions"].(map[string]any)
 	after, _ := versions["after"].(string)
-	deleted := eng.Execute(`delete Movies ` + id + ` {#: ` + after + `}`)
+	deleted := eng.Execute(commandreq.Must("delete", "Movies", id, map[string]any{"#": after}))
 	if deleted["ok"] != true {
 		t.Fatalf("delete failed: %#v", deleted)
 	}
@@ -96,7 +97,7 @@ func TestCreateReadPatchDeleteWithPeriodDocumentID(t *testing.T) {
 
 func TestCreateBangMismatch(t *testing.T) {
 	eng := testEngine(t)
-	res := eng.Execute(`create Movies ABC123 {$: Movies:0, !: OTHER, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "ABC123", map[string]any{"$": "Movies:0", "!": "OTHER", "title": "x"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}
@@ -104,10 +105,10 @@ func TestCreateBangMismatch(t *testing.T) {
 
 func TestPatchSchemaValidation(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "x", status: released}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "x", "status": "released"}))
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
-	res := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: remove, path: /title}]}`)
+	res := eng.Execute(commandreq.Must("patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "remove", "path": "/title"}}}))
 	if res["ok"] != false {
 		t.Fatalf("expected schema failure: %#v", res)
 	}
@@ -115,7 +116,7 @@ func TestPatchSchemaValidation(t *testing.T) {
 
 func TestConcurrentSameVersionPatch(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "x", status: released}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000003", map[string]any{"$": "Movies:0", "title": "x", "status": "released"}))
 	id, _ := created["id"].(string)
 	ver, _ := created["#"].(string)
 	var success atomic.Int32
@@ -125,7 +126,7 @@ func TestConcurrentSameVersionPatch(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res := eng.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: replace, path: /status, value: archived}]}`)
+			res := eng.Execute(commandreq.Must("patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "replace", "path": "/status", "value": "archived"}}}))
 			if res["ok"] == true {
 				success.Add(1)
 				return
@@ -148,7 +149,7 @@ func TestConcurrentSameVersionPatch(t *testing.T) {
 
 func TestQueueWriteSurfaced(t *testing.T) {
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTMOVIES00000000000004 {$: Movies:0, title: "x"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000004", map[string]any{"$": "Movies:0", "title": "x"}))
 	if created["ok"] != true {
 		t.Fatalf("%#v", created)
 	}

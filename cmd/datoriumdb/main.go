@@ -18,6 +18,7 @@ import (
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/engine"
 	"github.com/JohnAD/datoriumdb/internal/establish"
+	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/replication"
 	"github.com/JohnAD/datoriumdb/internal/scheduler"
 	"github.com/JohnAD/datoriumdb/internal/server"
@@ -141,6 +142,9 @@ func main() {
 		} else if len(resumed) > 0 {
 			log.Printf("resumed replication for %d incomplete operation(s) found on startup", len(resumed))
 		}
+		if err := fsstore.RecoverAllFileOps(dataDir); err != nil {
+			log.Printf("warning: file-operation recovery on startup encountered an error: %v", err)
+		}
 
 		eng.ReadState = &replication.ReadMemberState{
 			StaleThreshold: eng.Cfg.General.General.ReadMemberFailedCheckinsBeforeStale,
@@ -152,11 +156,25 @@ func main() {
 			Tokens:     tokens,
 			State:      eng.ReadState,
 		}
+		maxFileBytes := eng.Cfg.General.General.MaxFileBytes
+		if maxFileBytes <= 0 {
+			maxFileBytes = 1 << 30
+		}
+		fileAgent := &replication.FileCatchUpAgent{
+			ServerName:   serverName,
+			DataDir:      dataDir,
+			Cfg:          eng.Cfg,
+			Tokens:       tokens,
+			State:        eng.ReadState,
+			MaxFileBytes: maxFileBytes,
+		}
 		checkinInterval := time.Duration(eng.Cfg.General.General.ReadMemberCheckinSeconds) * time.Second
 		if checkinInterval <= 0 {
 			checkinInterval = 10 * time.Second
 		}
-		go runCatchUpLoop(ctx, agent, eng, checkinInterval)
+		go runCatchUpLoop(ctx, agent, fileAgent, eng, checkinInterval)
+	} else if err := fsstore.RecoverAllFileOps(dataDir); err != nil {
+		log.Printf("warning: file-operation recovery on startup encountered an error: %v", err)
 	}
 
 	// Wire the in-process scheduler and background agents
@@ -260,11 +278,16 @@ func main() {
 // interval), then every checkinInterval with each SOT-member this server
 // depends on for at least one shard slot, applying and completing any
 // pending work.
-func runCatchUpLoop(ctx context.Context, agent *replication.CatchUpAgent, eng *engine.Engine, checkinInterval time.Duration) {
+func runCatchUpLoop(ctx context.Context, agent *replication.CatchUpAgent, fileAgent *replication.FileCatchUpAgent, eng *engine.Engine, checkinInterval time.Duration) {
 	checkInAll := func() {
 		for _, sot := range replication.RelevantSOTServers(eng.Cfg, agent.ServerName) {
 			if err := agent.CheckIn(ctx, sot); err != nil {
 				log.Printf("replication check-in with %s failed: %v", sot, err)
+			}
+			if fileAgent != nil {
+				if err := fileAgent.CheckInFile(ctx, sot); err != nil {
+					log.Printf("file replication check-in with %s failed: %v", sot, err)
+				}
 			}
 		}
 	}

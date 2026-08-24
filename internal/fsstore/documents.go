@@ -143,13 +143,21 @@ func PreservePreviousIfAbsent(dataDir, collection, id string) error {
 
 // SoftDeleteDocument moves the live document to the previous/deleted path,
 // preserving an existing previous file by removing the live document instead.
+// Attachment files and the files manifest for the document are cascade-deleted
+// idempotently after the document soft-delete succeeds.
 func SoftDeleteDocument(dataDir, collection, id string) error {
 	live := DocumentPath(dataDir, collection, id)
 	prev := PreviousDocumentPath(dataDir, collection, id)
-	if _, err := os.Stat(prev); err == nil {
-		return os.Remove(live)
+	var err error
+	if _, statErr := os.Stat(prev); statErr == nil {
+		err = os.Remove(live)
+	} else {
+		err = os.Rename(live, prev)
 	}
-	return os.Rename(live, prev)
+	if err != nil {
+		return err
+	}
+	return CascadeDeleteDocumentFiles(dataDir, collection, id)
 }
 
 // ChangeQueueDir returns the per-collection change queue directory.

@@ -76,6 +76,9 @@ POST /datoriumdb/v1/sys/apply-document-write
 
 A target that acknowledges is finished. A target that does not gets a matching `.pendingWrites` file; that member discovers the work through the pending-write list / catch-up APIs below. The SOT does not retry failed targets.
 
+Binary attachments use a parallel lane (`apply-file-write` and
+`.pendingFileWrites`) documented in [BINARY-FILES.md](BINARY-FILES.md).
+
 Request body:
 
 ```json
@@ -243,7 +246,7 @@ On success, the returned envelope should include the work item:
 
 For document write work items with `command: patch`, `patch` contains an RFC 6902-compatible operation list.
 
-Unlike user-submitted access-language patches, SOT-authored replication patches may update database-owned metadata fields. In particular, the patch must carry the `/#` change so every read member stores the same document version created by the SOT-member.
+Unlike user-submitted patches, SOT-authored replication patches may update database-owned metadata fields. In particular, the patch must carry the `/#` change so every read member stores the same document version created by the SOT-member.
 
 For full document replication work, such as a create, the work item can use `payload` instead.
 

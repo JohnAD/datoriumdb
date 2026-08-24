@@ -3,8 +3,10 @@
 package contract
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/engine"
 	"github.com/JohnAD/datoriumdb/test/testutil"
 )
@@ -27,7 +29,7 @@ func newContractEngine(t *testing.T) *engine.Engine {
 
 func TestGoldenCreateOK(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
 	if res["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", res)
 	}
@@ -36,11 +38,11 @@ func TestGoldenCreateOK(t *testing.T) {
 
 func TestGoldenCreateDocumentExists(t *testing.T) {
 	eng := newContractEngine(t)
-	first := eng.Execute(`create Movies fixedid001 {$: Movies:0, title: "The Matrix"}`)
+	first := eng.Execute(commandreq.Must("create", "Movies", "fixedid001", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
 	if first["ok"] != true {
 		t.Fatalf("expected first create to succeed: %#v", first)
 	}
-	res := eng.Execute(`create Movies fixedid001 {$: Movies:0, title: "Duplicate"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "fixedid001", map[string]any{"$": "Movies:0", "title": "Duplicate"}))
 	if res["ok"] != false {
 		t.Fatalf("expected duplicate create to fail: %#v", res)
 	}
@@ -49,7 +51,7 @@ func TestGoldenCreateDocumentExists(t *testing.T) {
 
 func TestGoldenCreateInvalidDocumentID(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create Movies "not/safe" {$: Movies:0, title: "The Matrix"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "not/safe", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
 	if res["ok"] != false {
 		t.Fatalf("expected invalid id create to fail: %#v", res)
 	}
@@ -58,7 +60,7 @@ func TestGoldenCreateInvalidDocumentID(t *testing.T) {
 
 func TestGoldenCreateSchemaMismatch(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:99, title: "The Matrix"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:99", "title": "The Matrix"}))
 	if res["ok"] != false {
 		t.Fatalf("expected schema mismatch to fail: %#v", res)
 	}
@@ -67,7 +69,7 @@ func TestGoldenCreateSchemaMismatch(t *testing.T) {
 
 func TestGoldenReadNotFound(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`read Movies doesNotExist001 {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", "doesNotExist001", map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected read of missing document to fail: %#v", res)
 	}
@@ -76,11 +78,11 @@ func TestGoldenReadNotFound(t *testing.T) {
 
 func TestGoldenReadOK(t *testing.T) {
 	eng := newContractEngine(t)
-	created := eng.Execute(`create Movies fixedid002 {$: Movies:0, title: "Arrival", releaseYear: 2016}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedid002", map[string]any{"$": "Movies:0", "title": "Arrival", "releaseYear": 2016}))
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
-	res := eng.Execute(`read Movies fixedid002 {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", "fixedid002", map[string]any{}))
 	if res["ok"] != true {
 		t.Fatalf("expected read to succeed: %#v", res)
 	}
@@ -89,9 +91,9 @@ func TestGoldenReadOK(t *testing.T) {
 
 func TestGoldenPatchOK(t *testing.T) {
 	eng := newContractEngine(t)
-	created := eng.Execute(`create Movies fixedid003 {$: Movies:0, title: "Interstellar"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedid003", map[string]any{"$": "Movies:0", "title": "Interstellar"}))
 	ver, _ := created["#"].(string)
-	res := eng.Execute(`patch Movies fixedid003 {$: Movies:0, #: ` + ver + `, RFC6902: [{op: add, path: /status, value: released}]}`)
+	res := eng.Execute(commandreq.Must("patch", "Movies", "fixedid003", map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "add", "path": "/status", "value": "released"}}}))
 	if res["ok"] != true {
 		t.Fatalf("expected patch to succeed: %#v", res)
 	}
@@ -100,11 +102,11 @@ func TestGoldenPatchOK(t *testing.T) {
 
 func TestGoldenPatchVersionMismatch(t *testing.T) {
 	eng := newContractEngine(t)
-	created := eng.Execute(`create Movies fixedid004 {$: Movies:0, title: "Interstellar"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedid004", map[string]any{"$": "Movies:0", "title": "Interstellar"}))
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
-	res := eng.Execute(`patch Movies fixedid004 {$: Movies:0, #: notTheRealVersion, RFC6902: [{op: add, path: /status, value: released}]}`)
+	res := eng.Execute(commandreq.Must("patch", "Movies", "fixedid004", map[string]any{"$": "Movies:0", "#": "notTheRealVersion", "RFC6902": []any{map[string]any{"op": "add", "path": "/status", "value": "released"}}}))
 	if res["ok"] != false {
 		t.Fatalf("expected version mismatch to fail: %#v", res)
 	}
@@ -113,9 +115,9 @@ func TestGoldenPatchVersionMismatch(t *testing.T) {
 
 func TestGoldenDeleteOK(t *testing.T) {
 	eng := newContractEngine(t)
-	created := eng.Execute(`create Movies fixedid005 {$: Movies:0, title: "Arrival"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedid005", map[string]any{"$": "Movies:0", "title": "Arrival"}))
 	ver, _ := created["#"].(string)
-	res := eng.Execute(`delete Movies fixedid005 {#: ` + ver + `}`)
+	res := eng.Execute(commandreq.Must("delete", "Movies", "fixedid005", map[string]any{"#": ver}))
 	if res["ok"] != true {
 		t.Fatalf("expected delete to succeed: %#v", res)
 	}
@@ -124,11 +126,11 @@ func TestGoldenDeleteOK(t *testing.T) {
 
 func TestGoldenDeleteVersionMismatch(t *testing.T) {
 	eng := newContractEngine(t)
-	created := eng.Execute(`create Movies fixedid006 {$: Movies:0, title: "Arrival"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedid006", map[string]any{"$": "Movies:0", "title": "Arrival"}))
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
-	res := eng.Execute(`delete Movies fixedid006 {#: notTheRealVersion}`)
+	res := eng.Execute(commandreq.Must("delete", "Movies", "fixedid006", map[string]any{"#": "notTheRealVersion"}))
 	if res["ok"] != false {
 		t.Fatalf("expected delete version mismatch to fail: %#v", res)
 	}
@@ -137,7 +139,7 @@ func TestGoldenDeleteVersionMismatch(t *testing.T) {
 
 func TestGoldenCollectionNotFound(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`create NoSuchCollection 01TESTNOSUCH00000000000003 {$: NoSuchCollection:0, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "NoSuchCollection", "01TESTNOSUCH00000000000003", map[string]any{"$": "NoSuchCollection:0", "title": "x"}))
 	if res["ok"] != false {
 		t.Fatalf("expected unknown collection to fail: %#v", res)
 	}
@@ -154,7 +156,7 @@ func TestGoldenWrongMachine(t *testing.T) {
 	// A fixed document ID keeps the resulting shard slot (a CRC32 hash of
 	// the ID) stable across runs, unlike the auto-generated ULID "null"
 	// would produce.
-	res := eng.Execute(`create Movies fixedid007 {$: Movies:0, title: "The Matrix"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", "fixedid007", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
 	if res["ok"] != false {
 		t.Fatalf("expected wrong-machine create to fail: %#v", res)
 	}
@@ -166,9 +168,66 @@ func TestGoldenWrongMachine(t *testing.T) {
 
 func TestGoldenUnknownCommand(t *testing.T) {
 	eng := newContractEngine(t)
-	res := eng.Execute(`frobnicate Movies null {}`)
+	res := eng.Execute(commandreq.Must("frobnicate", "Movies", "null", map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected unknown command to fail: %#v", res)
 	}
 	AssertGolden(t, "unknown_command", res)
+}
+
+func TestGoldenFileCreateOK(t *testing.T) {
+	eng := newContractEngine(t)
+	created := eng.Execute(commandreq.Must("create", "Movies", "fixedidfile01", map[string]any{"$": "Movies:0", "title": "Arrival"}))
+	if created["ok"] != true {
+		t.Fatalf("expected create to succeed: %#v", created)
+	}
+	res := eng.PutFile(strings.NewReader("abc"), "Movies", "fixedidfile01", "poster.png", engine.PutFileOptions{
+		ContentType: "image/png",
+		OperationID: "01FIXEDFILEOP000000000001",
+	})
+	if res["ok"] != true {
+		t.Fatalf("expected file create to succeed: %#v", res)
+	}
+	AssertGolden(t, "file_create_ok", res)
+}
+
+func TestGoldenFileExists(t *testing.T) {
+	eng := newContractEngine(t)
+	_ = eng.Execute(commandreq.Must("create", "Movies", "fixedidfile02", map[string]any{"$": "Movies:0", "title": "Arrival"}))
+	first := eng.PutFile(strings.NewReader("abc"), "Movies", "fixedidfile02", "poster.png", engine.PutFileOptions{ContentType: "image/png"})
+	if first["ok"] != true {
+		t.Fatalf("expected first put to succeed: %#v", first)
+	}
+	res := eng.PutFile(strings.NewReader("abc"), "Movies", "fixedidfile02", "poster.png", engine.PutFileOptions{ContentType: "image/png"})
+	if res["ok"] != false {
+		t.Fatalf("expected fileExists: %#v", res)
+	}
+	AssertGolden(t, "file_exists", res)
+}
+
+func TestGoldenFileListOK(t *testing.T) {
+	eng := newContractEngine(t)
+	_ = eng.Execute(commandreq.Must("create", "Movies", "fixedidfile03", map[string]any{"$": "Movies:0", "title": "Arrival"}))
+	put := eng.PutFile(strings.NewReader("abc"), "Movies", "fixedidfile03", "poster.png", engine.PutFileOptions{
+		ContentType: "image/png",
+		OperationID: "01FIXEDFILEOP000000000003",
+	})
+	if put["ok"] != true {
+		t.Fatalf("expected put: %#v", put)
+	}
+	res := eng.ListFiles("Movies", "fixedidfile03")
+	if res["ok"] != true {
+		t.Fatalf("expected list: %#v", res)
+	}
+	AssertGolden(t, "file_list_ok", res)
+}
+
+func TestGoldenFileInvalidName(t *testing.T) {
+	eng := newContractEngine(t)
+	_ = eng.Execute(commandreq.Must("create", "Movies", "fixedidfile04", map[string]any{"$": "Movies:0", "title": "Arrival"}))
+	res := eng.PutFile(strings.NewReader("x"), "Movies", "fixedidfile04", ".hidden", engine.PutFileOptions{})
+	if res["ok"] != false {
+		t.Fatalf("expected invalidFileName: %#v", res)
+	}
+	AssertGolden(t, "file_invalid_name", res)
 }
