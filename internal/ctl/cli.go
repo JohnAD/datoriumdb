@@ -52,7 +52,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		DataDir:          dataDir,
 		EstablishmentURL: establishmentURL,
 		AdminToken:       adminToken,
-		SigningKeyFile:     signingKeyFile,
+		SigningKeyFile:   signingKeyFile,
 		DryRun:           dryRun,
 		JSON:             asJSON,
 		Quiet:            quiet,
