@@ -4,7 +4,7 @@ This document tracks API endpoints used between DatoriumDB servers.
 
 These endpoints are separate from smart-client command routing. They are used for establishment refresh, replication catch-up, schema history access, search patch delivery, cache update catch-up, and other internal server coordination.
 
-Server-to-server endpoints are not the mechanism for creating collections, upgrading schemas, or editing establishment config. Those administrative changes are performed through command-line tools described in [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
+Server-to-server endpoints are not the mechanism for creating collections, upgrading schemas, or editing establishment config. Those administrative changes use the establishment-only admin `/command` API (`collectionEnsure`, `searchEnsure`, `searchDelete`); see [docs/api.md](../docs/api.md) and [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
 
 ## Goals
 

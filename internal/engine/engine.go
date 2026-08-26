@@ -112,6 +112,12 @@ func (e *Engine) Execute(req commandreq.Request) envelope.Result {
 		return e.delete(req, detail)
 	case "search":
 		return e.search(req, detail)
+	case "collectionEnsure":
+		return e.collectionEnsure(req, detail)
+	case "searchEnsure":
+		return e.searchEnsure(req, detail)
+	case "searchDelete":
+		return e.searchDeleteCmd(req)
 	case "fileCreate", "fileUpdate":
 		return envelope.Fail(map[string]any{"command": req.Command}, envelope.Error{
 			Code:    "contentTypeRequired",

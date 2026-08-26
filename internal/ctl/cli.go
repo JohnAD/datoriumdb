@@ -6,6 +6,7 @@ package ctl
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -33,16 +34,32 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	quiet, args := extractBoolFlag(args, "--quiet")
 	yes, args := extractBoolFlag(args, "--yes")
 
+	establishmentURL, args, _ := extractFlag(args, "--establishment-url")
+	if establishmentURL == "" {
+		establishmentURL = os.Getenv("DATORIUMDB_ESTABLISHMENT_URL")
+	}
+	adminToken, args, _ := extractFlag(args, "--admin-token")
+	if adminToken == "" {
+		adminToken = os.Getenv("DATORIUMDB_ADMIN_TOKEN")
+	}
+	signingKeyFile, args, _ := extractFlag(args, "--signing-key-file")
+	if signingKeyFile == "" {
+		signingKeyFile = os.Getenv("DATORIUMDB_SIGNING_KEY_FILE")
+	}
+
 	ctx := &Context{
-		ConfigDir: configDir,
-		DataDir:   dataDir,
-		DryRun:    dryRun,
-		JSON:      asJSON,
-		Quiet:     quiet,
-		Yes:       yes,
-		Stdin:     stdin,
-		Stdout:    stdout,
-		Stderr:    stderr,
+		ConfigDir:        configDir,
+		DataDir:          dataDir,
+		EstablishmentURL: establishmentURL,
+		AdminToken:       adminToken,
+		SigningKeyFile:     signingKeyFile,
+		DryRun:           dryRun,
+		JSON:             asJSON,
+		Quiet:            quiet,
+		Yes:              yes,
+		Stdin:            stdin,
+		Stdout:           stdout,
+		Stderr:           stderr,
 	}
 
 	if len(args) == 0 {
@@ -165,7 +182,7 @@ func usage() string {
 		"  auth show|set|key add|key retire|token issue",
 		"  search create|delete|list",
 		"",
-		"global options: --config-dir <path> --data-dir <path> --dry-run --json --quiet --yes",
+		"global options: --config-dir <path> --data-dir <path> --establishment-url <url> --admin-token <token> --signing-key-file <path> --dry-run --json --quiet --yes",
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

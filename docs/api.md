@@ -32,9 +32,9 @@ capped at **1 MiB**):
 
 | Field | Meaning |
 | --- | --- |
-| `command` | Command name (`create`, `read`, `patch`, `delete`, `search`, or a `file*` command) |
+| `command` | Command name (`create`, `read`, `patch`, `delete`, `search`, a `file*` command, or an admin ensure command) |
 | `target` | Collection (or other addressed object) |
-| `parameter` | Primary parameter (document ID, search name, …) |
+| `parameter` | Primary parameter (document ID, search name, …); may be empty for `collectionEnsure` |
 | `detail` | Always a JSON **object** (use `{}` when empty). Unknown root fields are rejected. |
 
 `fileCreate` / `fileUpdate` use `multipart/form-data` instead: a small
@@ -160,6 +160,53 @@ File operations share `POST /datoriumdb/v1/command`:
 Writes route to the parent document's SOT member; reads/list route to a read
 member. Full semantics: [Binary Attachment Storage](../tech-docs/BINARY-FILES.md).
 
+## Admin commands (establishment only)
+
+Declarative catalog mutations use the same `/command` URL but require an
+**admin** JWT (`datoriumdb.kind=admin`) and must be sent to the
+**establishment server**. The response returns after config files are written
+and the establishment engine reloads; document `$` migration continues in the
+background.
+
+| Command | Purpose |
+| --- | --- |
+| `collectionEnsure` | Create collection at schema v0, or apply one upgrade step |
+| `searchEnsure` | Create a search definition (immutable; identical = no-op) |
+| `searchDelete` | Delete a search definition (absent = no-op) |
+
+```json
+{
+  "command": "collectionEnsure",
+  "target": "Movies",
+  "parameter": "",
+  "detail": {
+    "schema": { "kind": "object", "children": [ /* ... */ ] }
+  }
+}
+```
+
+One-step upgrade (client loops for multi-version jumps):
+
+```json
+{
+  "command": "collectionEnsure",
+  "target": "Movies",
+  "parameter": "",
+  "detail": {
+    "upgrade": {
+      "from": 0,
+      "new_ver_id": "01...",
+      "updates": [ /* schemapatch ops */ ]
+    }
+  }
+}
+```
+
+If the desired state already matches, the response is `ok: true` with
+`changed: false`. `datoriumctl collection create|upgrade` and
+`search create|delete` call these HTTP commands (they no longer write schemas
+directly under `--config-dir`).
+
 ## Common error codes
 
 | Code | Meaning | What to do |
@@ -177,6 +224,9 @@ member. Full semantics: [Binary Attachment Storage](../tech-docs/BINARY-FILES.md
 | `invalidFileName` | Unsafe or empty filename | Use a single basename without path separators or leading `.` |
 | `fileTooLarge` | Upload exceeds `maxFileBytes` | Reduce size or raise establishment `maxFileBytes` |
 | `fileStale` | Read member knows this file is pending catch-up | Retry shortly |
+| `adminRequired` | Admin command without an admin token | Issue `--kind admin` and retry |
+| `establishmentRequired` | Admin command not sent to the establishment server | Use the establishment base URL |
+| `schemaDrift` | `collectionEnsure` schema does not match and no upgrade was supplied | Supply a valid one-step `upgrade` or matching schema |
 | `invalidRequest` | Malformed JSON, unknown root field, non-object `detail` | Fix the request body |
 | `notReady` | Server has not loaded establishment config yet | Wait and retry |
 | `contentTypeRequired` | Wrong Content-Type | Use `application/json`, or multipart for file create/update |

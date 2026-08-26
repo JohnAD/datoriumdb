@@ -70,6 +70,75 @@ func TestIssueAndValidateClientToken(t *testing.T) {
 	}
 }
 
+func TestIssueAndValidateAdminToken(t *testing.T) {
+	pub, priv := mustKeyPair(t)
+	cfg := testAuthFile(t, pub, nil)
+
+	issuer, err := NewIssuer(cfg, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, lifetime, err := issuer.IssueAdminToken("admin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lifetime != time.Hour {
+		t.Fatalf("expected default 1h lifetime, got %v", lifetime)
+	}
+
+	validator, err := NewValidator(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := validator.ParseToken(token)
+	if err != nil {
+		t.Fatalf("expected valid token: %v", err)
+	}
+	if claims.Kind != KindAdmin || claims.Subject != "admin" {
+		t.Fatalf("unexpected claims: %#v", claims)
+	}
+	if claims.ServerName != "" {
+		t.Fatalf("admin token must not carry a server name: %#v", claims)
+	}
+}
+
+func TestRequireAdmin(t *testing.T) {
+	pub, priv := mustKeyPair(t)
+	cfg := testAuthFile(t, pub, nil)
+	issuer, err := NewIssuer(cfg, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator, err := NewValidator(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adminTok, _, err := issuer.IssueAdminToken("admin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminClaims, err := validator.ParseToken(adminTok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireAdmin(adminClaims); err != nil {
+		t.Fatalf("expected admin token to pass RequireAdmin: %v", err)
+	}
+
+	clientTok, _, err := issuer.IssueClientToken("alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientClaims, err := validator.ParseToken(clientTok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireAdmin(clientClaims); errCode(err) != "adminRequired" {
+		t.Fatalf("expected adminRequired for client token, got %v", err)
+	}
+}
+
 func TestIssueAndValidateMachineToken(t *testing.T) {
 	pub, priv := mustKeyPair(t)
 	cfg := testAuthFile(t, pub, nil)

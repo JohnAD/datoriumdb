@@ -48,10 +48,15 @@ The initial access command set is:
 - `search` reads a precompiled search result list.
 - `fileCreate` / `fileUpdate` / `fileRead` / `fileList` / `fileDelete` manage
   binary attachments (see [BINARY-FILES.md](BINARY-FILES.md)).
+- `collectionEnsure` / `searchEnsure` / `searchDelete` are establishment-only
+  admin catalog commands (require `datoriumdb.kind=admin`; see [docs/api.md](../docs/api.md)).
 
 There is no whole-document `update` command. Blind whole-document updates are bad practice because they can overwrite data unintentionally and bypass the more precise patch model.
 
-Collection creation and schema upgrades are administrative operations, not access-language commands. They are performed through command-line tools that validate and update the establishment config files.
+Collection creation and schema upgrades are administrative operations on the
+establishment server (`collectionEnsure` / related search commands). Clients and
+`datoriumctl` call the same admin `/command` path; filesystem writes happen only
+inside that server path.
 
 ## HTTP Transport
 

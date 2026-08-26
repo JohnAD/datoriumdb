@@ -3,9 +3,11 @@ package establish
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,6 +64,57 @@ func writeFail(w http.ResponseWriter, code, message string) {
 func TestHasLocalConfigFalseForMissingDir(t *testing.T) {
 	if HasLocalConfig(t.TempDir() + "/does-not-exist") {
 		t.Fatalf("expected no local config for a nonexistent directory")
+	}
+}
+
+func TestWorkerOnConfigCachedCalledAfterRefresh(t *testing.T) {
+	fake := &fakeEstablishmentServer{}
+	ts := httptest.NewServer(fake.handler())
+	defer ts.Close()
+
+	root := t.TempDir()
+	called := false
+	w := &Worker{
+		ServerName:       "serverB",
+		EstablishmentURL: ts.URL,
+		BootstrapSecret:  "secret",
+		ConfigDir:        filepath.Join(root, ".config"),
+		DataDir:          filepath.Join(root, "data"),
+		OnConfigCached: func() error {
+			called = true
+			return nil
+		},
+	}
+	if err := w.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce failed: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected OnConfigCached to be called after a successful refresh")
+	}
+}
+
+func TestWorkerOnConfigCachedErrorReturned(t *testing.T) {
+	fake := &fakeEstablishmentServer{}
+	ts := httptest.NewServer(fake.handler())
+	defer ts.Close()
+
+	root := t.TempDir()
+	w := &Worker{
+		ServerName:       "serverB",
+		EstablishmentURL: ts.URL,
+		BootstrapSecret:  "secret",
+		ConfigDir:        filepath.Join(root, ".config"),
+		DataDir:          filepath.Join(root, "data"),
+		OnConfigCached: func() error {
+			return fmt.Errorf("reload failed")
+		},
+	}
+	err := w.RefreshOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "reload failed") {
+		t.Fatalf("expected OnConfigCached error to fail RefreshOnce, got %v", err)
+	}
+	if !HasLocalConfig(w.ConfigDir) {
+		t.Fatalf("expected config to be cached even when OnConfigCached fails")
 	}
 }
 

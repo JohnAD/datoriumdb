@@ -9,6 +9,7 @@ type Kind string
 const (
 	KindClient  Kind = "client"
 	KindMachine Kind = "machine"
+	KindAdmin   Kind = "admin"
 )
 
 // Private claim names used by DatoriumDB tokens, beyond the registered JWT

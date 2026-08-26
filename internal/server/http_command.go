@@ -17,7 +17,8 @@ import (
 // handleCommand serves POST /datoriumdb/v1/command.
 // Document/search/fileList/fileDelete/fileRead use application/json.
 // fileCreate/fileUpdate use multipart/form-data with parts "command" and "content".
-func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+// Admin ensure commands require an admin JWT and the establishment server.
+func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	if s.Engine.Cfg == nil {
 		if err := s.Engine.Reload(); err != nil {
 			writeJSON(w, envelope.Fail(nil, envelope.Error{Code: "configError", Message: err.Error()}))
@@ -37,7 +38,7 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request, _ aut
 	case "multipart/form-data":
 		s.handleMultipartCommand(w, r, params["boundary"])
 	case "application/json":
-		s.handleJSONCommand(w, r)
+		s.handleJSONCommand(w, r, claims)
 	default:
 		writeJSON(w, envelope.Fail(nil, envelope.Error{
 			Code:    "contentTypeRequired",
@@ -46,7 +47,7 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request, _ aut
 	}
 }
 
-func (s *HTTPServer) handleJSONCommand(w http.ResponseWriter, r *http.Request) {
+func (s *HTTPServer) handleJSONCommand(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	body, ferr := readBodyLimited(w, r, maxCommandBodyBytes)
 	if ferr != nil {
 		writeJSON(w, envelope.Fail(nil, *ferr))
@@ -72,6 +73,13 @@ func (s *HTTPServer) handleJSONCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	case "fileDelete":
 		writeJSON(w, s.dispatchFileDelete(req))
+		return
+	case "collectionEnsure", "searchEnsure", "searchDelete":
+		if err := auth.RequireAdmin(claims); err != nil {
+			writeJSON(w, envelope.Fail(map[string]any{"command": req.Command}, toEnvelopeError(err)))
+			return
+		}
+		writeJSON(w, s.Engine.Execute(req))
 		return
 	default:
 		writeJSON(w, s.Engine.Execute(req))

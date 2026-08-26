@@ -18,7 +18,10 @@ Schema upgrades always advance by exactly one version. The target version is `fr
 
 This update list is not exactly RFC 6902. A schema update manipulates both the schema and the underlying documents at the same time.
 
-Collections are created and advanced through administrative command-line tools, not access-language commands. Command-line tooling is tracked in [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
+Collections are created and advanced through the establishment-only admin
+commands (`collectionEnsure`), which `datoriumctl` and smart clients both call.
+Document CRUD remains separate access-language commands. See [docs/api.md](../docs/api.md)
+and [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
 
 ## Upgrade Atomicity
 

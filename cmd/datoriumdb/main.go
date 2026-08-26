@@ -108,6 +108,15 @@ func main() {
 			ConfigDir:        configDir,
 			DataDir:          dataDir,
 		}
+		worker.OnConfigCached = func() error {
+			if err := eng.Reload(); err != nil {
+				return err
+			}
+			if eng.Replicator != nil {
+				eng.Replicator.Cfg = eng.Cfg
+			}
+			return nil
+		}
 		if err := worker.Bootstrap(ctx); err != nil {
 			log.Fatalf("establishment bootstrap failed: %v", err)
 		}

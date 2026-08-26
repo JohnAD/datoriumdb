@@ -57,6 +57,10 @@ type Worker struct {
 	MaxConsecutiveFailures int
 	// Logger defaults to the standard logger.
 	Logger *log.Logger
+	// OnConfigCached is called after a successful RefreshOnce writes config
+	// to disk. Used by the server to eng.Reload() so in-memory schemas stay
+	// current.
+	OnConfigCached func() error
 
 	mu             sync.Mutex
 	token          string
@@ -206,6 +210,11 @@ func (w *Worker) RefreshOnce(ctx context.Context) error {
 	}
 	if err := w.createCollectionDirs(doc); err != nil {
 		return fmt.Errorf("create collection directories: %w", err)
+	}
+	if w.OnConfigCached != nil {
+		if err := w.OnConfigCached(); err != nil {
+			return fmt.Errorf("onConfigCached: %w", err)
+		}
 	}
 	return nil
 }

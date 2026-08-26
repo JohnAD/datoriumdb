@@ -70,7 +70,12 @@ The establishment server reads the values it serves from `/db/.config`.
 
 This directory contains establishment-owned config files. Those files should be readable, plain JSON, and suitable for storage in a Git repository.
 
-The config files should not be directly modified by hand during normal operation. For now, the expected update path is a command-line tool that validates requested changes and writes the config files safely. Command-line tooling is tracked in [COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md).
+The config files should not be directly modified by hand during normal operation.
+Collection and search catalog mutations go through the establishment server's
+admin `/command` API (`collectionEnsure`, `searchEnsure`, `searchDelete`), which
+validates and writes config safely. `datoriumctl` uses that HTTP path for those
+mutations; other config tools may still operate on `--config-dir`. See
+[COMMAND-LINE-TOOLS.md](COMMAND-LINE-TOOLS.md) and [docs/api.md](../docs/api.md).
 
 Individual DatoriumDB servers also store local copies of these files in `/db/.config` by default. Those local copies are not the source of truth. They are refreshed from the establishment server and give each server a local, inspectable copy of the config it is currently using.
 
@@ -400,13 +405,16 @@ They should also refresh when:
 
 A reasonable MVP refresh policy is event-driven refresh plus a periodic poll every `60` seconds.
 
-Establishment config file updates should be made through a command-line tool, not by directly editing files in `/db/.config`.
+Do not edit files in `/db/.config` by hand during normal operation.
 
 On the establishment server, `/db/.config` is the source directory for the served config. On other DatoriumDB servers, `/db/.config` is a local cache of the establishment config returned by the establishment server.
 
-Collection creation and schema upgrades are also command-line tool responsibilities. They are not access-language commands and are not general server-to-server API operations.
+Collection creation, schema upgrades, and search catalog changes go through the
+establishment admin `/command` API (used by clients and `datoriumctl`). They are
+not ordinary document access-language commands and are not general
+server-to-server replication operations.
 
-The command-line tool should:
+That mutation path should:
 
 - validate the requested config change
 - write plain JSON config files
@@ -435,7 +443,7 @@ The MVP should support:
 - search definitions in `/db/.config/{CollectionName}.search.{SearchName}.json`
 - current search definitions in the establishment response
 - config versioning
-- command-line config updates
+- admin `/command` catalog mutations (`collectionEnsure`, `searchEnsure`, `searchDelete`) and CLI wrappers
 
 The MVP does not need:
 

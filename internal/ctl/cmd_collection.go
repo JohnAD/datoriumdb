@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
@@ -24,48 +23,35 @@ func cmdCollectionCreate(ctx *Context, args []string) Outcome {
 		return ValidationFailSimple("collection.create", "invalidSchema", fmt.Sprintf("cannot read schema file: %v", err))
 	}
 
-	mutate := func(cfg *config.Config) (*Plan, map[string]any, []envelope.Error) {
-		fields := map[string]any{"collection": name}
-		if !config.ValidCollectionName(name) {
-			return nil, fields, []envelope.Error{{Code: "invalidCollectionName", Message: "collection name violates naming conventions", Actual: name}}
-		}
-		if _, exists := cfg.Schemas[name]; exists {
-			return nil, fields, []envelope.Error{{Code: "collectionAlreadyExists", Message: "collection already exists", Actual: name}}
-		}
-		if err := config.ValidateOJSONSchemaBytes(rawSchema); err != nil {
-			return nil, fields, []envelope.Error{{Code: "invalidSchema", Message: err.Error()}}
-		}
-		if errs := config.ValidateCollectionSchemaRules(rawSchema, cfg.Schemas); len(errs) > 0 {
-			return nil, fields, errs
-		}
-		pretty, err := ReindentJSON(rawSchema)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "invalidJSON", Message: err.Error()}}
-		}
-
-		cfg.Schemas[name] = json.RawMessage(pretty)
-		if cfg.SchemaHistory[name] == nil {
-			cfg.SchemaHistory[name] = map[int]json.RawMessage{}
-		}
-		cfg.SchemaHistory[name][0] = json.RawMessage(pretty)
-		cfg.SchemaVersions[name] = 0
-		if errs := cfg.ValidateDetailed(); len(errs) > 0 {
-			return nil, fields, errs
-		}
-
-		plan := &Plan{}
-		plan.AddWrite(schemaPath(cfg, name), pretty)
-		plan.AddWrite(schemaVersionPath(cfg, name, 0), pretty)
-		plan.AddDir(filepath.Join(ctx.DataDir, name))
-		nextVersion, err := stageGeneralBump(plan, cfg)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "filesystemError", Message: err.Error()}}
-		}
-		fields["schemaVersion"] = 0
-		fields["generalVersion"] = nextVersion
-		return plan, fields, nil
+	fields := map[string]any{"collection": name}
+	if !config.ValidCollectionName(name) {
+		return ValidationFail(fields, envelope.Error{Code: "invalidCollectionName", Message: "collection name violates naming conventions", Actual: name})
 	}
-	return runMutation(ctx, "collection.create", mutate)
+	if err := config.ValidateOJSONSchemaBytes(rawSchema); err != nil {
+		return ValidationFail(fields, envelope.Error{Code: "invalidSchema", Message: err.Error()})
+	}
+	cfg, outcome, ok := loadReadOnly(ctx, "collection.create")
+	if !ok {
+		return outcome
+	}
+	if _, exists := cfg.Schemas[name]; exists {
+		return ValidationFail(fields, envelope.Error{Code: "collectionAlreadyExists", Message: "collection already exists", Actual: name})
+	}
+	if errs := config.ValidateCollectionSchemaRules(rawSchema, cfg.Schemas); len(errs) > 0 {
+		return ValidationFail(fields, errs...)
+	}
+	schemaObj, outcome, ok := parseJSONObject(rawSchema)
+	if !ok {
+		outcome.Result["command"] = "collection.create"
+		return outcome
+	}
+
+	detail := map[string]any{"schema": schemaObj}
+	out := postAdminCommand(ctx, "collectionEnsure", name, "", detail)
+	if out.Result != nil {
+		out.Result["command"] = "collection.create"
+	}
+	return out
 }
 
 func cmdCollectionUpgrade(ctx *Context, args []string) Outcome {
@@ -84,58 +70,46 @@ func cmdCollectionUpgrade(ctx *Context, args []string) Outcome {
 		return ValidationFailSimple("collection.upgrade", "invalidSchemaUpgrade", err.Error())
 	}
 
-	mutate := func(cfg *config.Config) (*Plan, map[string]any, []envelope.Error) {
-		fields := map[string]any{"collection": name}
-		currentSchema, ok := cfg.Schemas[name]
-		if !ok {
-			return nil, fields, []envelope.Error{{Code: "collectionNotFound", Message: "collection does not exist", Actual: name}}
-		}
-		currentVersion := cfg.SchemaVersion(name)
-		if errs := spec.Validate(currentVersion); len(errs) > 0 {
-			return nil, fields, errs
-		}
-		newSchemaBytes, err := schemapatch.Apply(currentSchema, spec)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "invalidSchemaUpgrade", Message: err.Error()}}
-		}
-		if err := config.ValidateOJSONSchemaBytes(newSchemaBytes); err != nil {
-			return nil, fields, []envelope.Error{{Code: "invalidSchemaUpgrade", Message: err.Error()}}
-		}
-		tempSchemas := make(map[string]json.RawMessage, len(cfg.Schemas))
-		for k, v := range cfg.Schemas {
-			tempSchemas[k] = v
-		}
-		tempSchemas[name] = newSchemaBytes
-		if errs := config.ValidateCollectionSchemaRules(newSchemaBytes, tempSchemas); len(errs) > 0 {
-			return nil, fields, errs
-		}
-
-		newVer := currentVersion + 1
-		newSchemaBytes = ensureTrailingNewline(newSchemaBytes)
-		cfg.Schemas[name] = json.RawMessage(newSchemaBytes)
-		if cfg.SchemaHistory[name] == nil {
-			cfg.SchemaHistory[name] = map[int]json.RawMessage{}
-		}
-		cfg.SchemaHistory[name][newVer] = json.RawMessage(newSchemaBytes)
-		cfg.SchemaVersions[name] = newVer
-		if errs := cfg.ValidateDetailed(); len(errs) > 0 {
-			return nil, fields, errs
-		}
-
-		plan := &Plan{}
-		plan.AddWrite(schemaPath(cfg, name), newSchemaBytes)
-		plan.AddWrite(schemaVersionPath(cfg, name, newVer), newSchemaBytes)
-		plan.AddWrite(schemaUpdatePath(cfg, name, newVer), ensureTrailingNewline(rawUpgrade))
-		nextGeneralVersion, err := stageGeneralBump(plan, cfg)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "filesystemError", Message: err.Error()}}
-		}
-		fields["fromVersion"] = currentVersion
-		fields["toVersion"] = newVer
-		fields["generalVersion"] = nextGeneralVersion
-		return plan, fields, nil
+	fields := map[string]any{"collection": name}
+	cfg, outcome, ok := loadReadOnly(ctx, "collection.upgrade")
+	if !ok {
+		return outcome
 	}
-	return runMutation(ctx, "collection.upgrade", mutate)
+	currentSchema, exists := cfg.Schemas[name]
+	if !exists {
+		return ValidationFail(fields, envelope.Error{Code: "collectionNotFound", Message: "collection does not exist", Actual: name})
+	}
+	currentVersion := cfg.SchemaVersion(name)
+	if errs := spec.Validate(currentVersion); len(errs) > 0 {
+		return ValidationFail(fields, errs...)
+	}
+	newSchemaBytes, err := schemapatch.Apply(currentSchema, spec)
+	if err != nil {
+		return ValidationFail(fields, envelope.Error{Code: "invalidSchemaUpgrade", Message: err.Error()})
+	}
+	if err := config.ValidateOJSONSchemaBytes(newSchemaBytes); err != nil {
+		return ValidationFail(fields, envelope.Error{Code: "invalidSchemaUpgrade", Message: err.Error()})
+	}
+	tempSchemas := make(map[string]json.RawMessage, len(cfg.Schemas))
+	for k, v := range cfg.Schemas {
+		tempSchemas[k] = v
+	}
+	tempSchemas[name] = newSchemaBytes
+	if errs := config.ValidateCollectionSchemaRules(newSchemaBytes, tempSchemas); len(errs) > 0 {
+		return ValidationFail(fields, errs...)
+	}
+
+	upgradeObj, outcome, ok := parseJSONObject(rawUpgrade)
+	if !ok {
+		outcome.Result["command"] = "collection.upgrade"
+		return outcome
+	}
+	detail := map[string]any{"upgrade": upgradeObj}
+	out := postAdminCommand(ctx, "collectionEnsure", name, "", detail)
+	if out.Result != nil {
+		out.Result["command"] = "collection.upgrade"
+	}
+	return out
 }
 
 func cmdCollectionList(ctx *Context, _ []string) Outcome {
@@ -200,11 +174,4 @@ func cmdCollectionShow(ctx *Context, args []string) Outcome {
 	}
 	human := fmt.Sprintf("collection: %s\nversion: %d\nschema:\n%s\n", name, version, string(raw))
 	return OKHuman(fields, human)
-}
-
-func ensureTrailingNewline(b []byte) []byte {
-	if len(b) == 0 || b[len(b)-1] != '\n' {
-		return append(b, '\n')
-	}
-	return b
 }
