@@ -3,11 +3,16 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/JohnAD/datoriumdb/internal/auth"
+	"github.com/JohnAD/datoriumdb/internal/engine"
+	"github.com/JohnAD/datoriumdb/internal/server"
 )
 
 // binPath is the path to the datoriumctl binary built once in TestMain.
@@ -88,6 +93,36 @@ func (r cliResult) envelope(t *testing.T) map[string]any {
 		t.Fatalf("stdout is not valid JSON: %v\nstdout: %s\nstderr: %s", err, r.Stdout, r.Stderr)
 	}
 	return m
+}
+
+// startEstablishment serves configDir/dataDir as establishment serverA so
+// collection/search mutate commands can POST the admin HTTP API against the
+// same files the CLI validates locally.
+func startEstablishment(t *testing.T, configDir, dataDir string) string {
+	t.Helper()
+	if dataDir == "" {
+		dataDir = t.TempDir()
+	}
+	eng := &engine.Engine{ConfigDir: configDir, DataDir: dataDir, ServerName: "serverA"}
+	if err := eng.Reload(); err != nil {
+		t.Fatalf("reload engine: %v", err)
+	}
+	issuer, err := auth.NewIssuerFromFile(eng.Cfg.Auth, filepath.Join(configDir, "dev-signing-key.pem"))
+	if err != nil {
+		t.Fatalf("issuer: %v", err)
+	}
+	srv := &server.HTTPServer{Engine: eng, Issuer: issuer}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
+
+func adminArgs(configDir, estURL string, args ...string) []string {
+	out := []string{
+		"--establishment-url", estURL,
+		"--signing-key-file", filepath.Join(configDir, "dev-signing-key.pem"),
+	}
+	return append(out, args...)
 }
 
 func runCLI(t *testing.T, configDir string, extraEnv []string, args ...string) cliResult {
@@ -201,11 +236,12 @@ func TestCLIConfigShow(t *testing.T) {
 func TestCLICollectionCreateSuccess(t *testing.T) {
 	dir := freshConfigDir(t)
 	dataDir := t.TempDir()
+	est := startEstablishment(t, dir, dataDir)
 	schemaFile := filepath.Join(t.TempDir(), "People.schema.json")
 	if err := os.WriteFile(schemaFile, []byte(`{"kind":"object","children":[{"name":"name","kind":"string"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := runCLI(t, dir, nil, "--json", "--data-dir", dataDir, "collection", "create", "People", schemaFile)
+	res := runCLI(t, dir, nil, adminArgs(dir, est, "--json", "--data-dir", dataDir, "collection", "create", "People", schemaFile)...)
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
 	}
@@ -288,6 +324,7 @@ func TestCLICollectionCreateDryRunWritesNothing(t *testing.T) {
 
 func TestCLICollectionUpgradeSuccess(t *testing.T) {
 	dir := freshConfigDir(t)
+	est := startEstablishment(t, dir, t.TempDir())
 	upgradeFile := filepath.Join(t.TempDir(), "upgrade.json")
 	upgrade := `{
 		"from": 0,
@@ -299,13 +336,13 @@ func TestCLICollectionUpgradeSuccess(t *testing.T) {
 	if err := os.WriteFile(upgradeFile, []byte(upgrade), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := runCLI(t, dir, nil, "--json", "collection", "upgrade", "Movies", upgradeFile)
+	res := runCLI(t, dir, nil, adminArgs(dir, est, "--json", "collection", "upgrade", "Movies", upgradeFile)...)
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
 	}
 	env := res.envelope(t)
-	if env["toVersion"] != float64(1) {
-		t.Fatalf("expected toVersion 1, got %#v", env)
+	if env["schemaVersion"] != float64(1) {
+		t.Fatalf("expected schemaVersion 1, got %#v", env)
 	}
 	if !fileExists(filepath.Join(dir, "Movies.schema.1.json")) {
 		t.Fatal("expected Movies.schema.1.json to be written")
@@ -712,6 +749,7 @@ func TestCLIAuthTokenIssueMachineRequiresServerName(t *testing.T) {
 func TestCLISearchCreateListDelete(t *testing.T) {
 	dir := freshConfigDir(t)
 	dataDir := t.TempDir()
+	est := startEstablishment(t, dir, dataDir)
 	defFile := filepath.Join(t.TempDir(), "search-def.json")
 	body := `{
 		"$": "SearchDefinition:v1",
@@ -726,7 +764,7 @@ func TestCLISearchCreateListDelete(t *testing.T) {
 	if err := os.WriteFile(defFile, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := runCLI(t, dir, nil, "--json", "--data-dir", dataDir, "search", "create", "Movies", "byStatus", defFile)
+	res := runCLI(t, dir, nil, adminArgs(dir, est, "--json", "--data-dir", dataDir, "search", "create", "Movies", "byStatus", defFile)...)
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
 	}
@@ -750,7 +788,7 @@ func TestCLISearchCreateListDelete(t *testing.T) {
 		t.Fatalf("expected non-empty searches list, got %#v", env)
 	}
 
-	res = runCLI(t, dir, nil, "--json", "--yes", "search", "delete", "Movies", "byStatus")
+	res = runCLI(t, dir, nil, adminArgs(dir, est, "--json", "--yes", "search", "delete", "Movies", "byStatus")...)
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
 	}
@@ -765,6 +803,7 @@ func TestCLISearchCreateListDelete(t *testing.T) {
 func TestCLISearchCreateAlreadyExists(t *testing.T) {
 	dir := freshConfigDir(t)
 	dataDir := t.TempDir()
+	est := startEstablishment(t, dir, dataDir)
 	defFile := filepath.Join(t.TempDir(), "search-def.json")
 	body := `{
 		"$": "SearchDefinition:v1",
@@ -776,11 +815,11 @@ func TestCLISearchCreateAlreadyExists(t *testing.T) {
 	if err := os.WriteFile(defFile, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res := runCLI(t, dir, nil, "--json", "--data-dir", dataDir, "search", "create", "Movies", "dup", defFile)
+	res := runCLI(t, dir, nil, adminArgs(dir, est, "--json", "--data-dir", dataDir, "search", "create", "Movies", "dup", defFile)...)
 	if res.ExitCode != 0 {
 		t.Fatalf("first create should succeed, got %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
 	}
-	res = runCLI(t, dir, nil, "--json", "--data-dir", dataDir, "search", "create", "Movies", "dup", defFile)
+	res = runCLI(t, dir, nil, adminArgs(dir, est, "--json", "--data-dir", dataDir, "search", "create", "Movies", "dup", defFile)...)
 	if res.ExitCode != 1 {
 		t.Fatalf("expected exit 1 on duplicate create, got %d\nstdout: %s", res.ExitCode, res.Stdout)
 	}
