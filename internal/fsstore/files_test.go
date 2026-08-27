@@ -132,3 +132,85 @@ func TestManifestFieldOrder(t *testing.T) {
 		t.Fatalf("got %s", line)
 	}
 }
+
+func TestStreamWriteBinary(t *testing.T) {
+	dir := t.TempDir()
+	collection, docID, name := "Movies", "docStream", "pic.bin"
+	if err := EnsureCollectionDir(dir, collection); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("streamed-bytes")
+	res, err := StreamWriteBinary(dir, collection, docID, name, bytes.NewReader(payload), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ByteSize != int64(len(payload)) || res.Path == "" || res.SHA256 == "" {
+		t.Fatalf("unexpected result %#v", res)
+	}
+	got, err := os.ReadFile(res.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("got %q", got)
+	}
+
+	_, err = StreamWriteBinary(dir, collection, docID, "../evil", bytes.NewReader(payload), 100)
+	if err == nil {
+		t.Fatal("expected invalid file name")
+	}
+	_, err = StreamWriteBinary(dir, collection, docID, "big.bin", bytes.NewReader(make([]byte, 20)), 5)
+	if !IsFileTooLarge(err) {
+		t.Fatalf("expected fileTooLarge, got %v", err)
+	}
+}
+
+func TestRecoverAllFileOps(t *testing.T) {
+	dir := t.TempDir()
+	if err := RecoverAllFileOps(filepath.Join(dir, "missing")); err != nil {
+		t.Fatalf("missing data dir should succeed: %v", err)
+	}
+	collection, docID, name := "Movies", "doc1", "a.txt"
+	if err := EnsureCollectionDir(dir, collection); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(LFSDir(dir, collection, docID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(BinaryPath(dir, collection, docID, name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j := FileOpJournal{
+		Command: "create", Filename: name, ContentType: "text/plain",
+		ByteSize: 1, SHA256: "aa", Version: "v1", OperationID: "opAll", Phase: "blobCommitted",
+	}
+	if err := WriteFileOpJournal(dir, collection, docID, j); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverAllFileOps(dir); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ReadFilesManifest(dir, collection, docID)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected recovered manifest %#v err=%v", entries, err)
+	}
+}
+
+func TestDeletedDocumentPathAndReadDocumentBytes(t *testing.T) {
+	dir := t.TempDir()
+	collection, id := "Movies", "doc1"
+	if err := EnsureCollectionDir(dir, collection); err != nil {
+		t.Fatal(err)
+	}
+	path := DocumentPath(dir, collection, id)
+	if err := WriteFileAtomic(path, []byte(`{"ok":true}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := ReadDocumentBytes(path)
+	if err != nil || !bytes.Equal(raw, []byte(`{"ok":true}`+"\n")) {
+		t.Fatalf("ReadDocumentBytes got %q err=%v", raw, err)
+	}
+	if DeletedDocumentPath(dir, collection, id) != PreviousDocumentPath(dir, collection, id) {
+		t.Fatal("DeletedDocumentPath must match PreviousDocumentPath")
+	}
+}
