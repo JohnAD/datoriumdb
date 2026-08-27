@@ -98,6 +98,18 @@ func (i *Issuer) IssueClientToken(subject string, lifetime time.Duration) (token
 	return i.issue(KindClient, subject, "", lifetime)
 }
 
+// IssueAdminToken signs an admin token for subject. lifetime of 0 uses the
+// issuer's configured client lifetime.
+func (i *Issuer) IssueAdminToken(subject string, lifetime time.Duration) (token string, actual time.Duration, err error) {
+	if subject == "" {
+		return "", 0, fmt.Errorf("auth: admin token subject is required")
+	}
+	if lifetime <= 0 {
+		lifetime = i.ClientLifetime
+	}
+	return i.issue(KindAdmin, subject, "", lifetime)
+}
+
 // IssueMachineToken signs a machine token embedding serverName as the
 // datoriumdb.serverName claim. lifetime of 0 uses the issuer's configured
 // machine lifetime.

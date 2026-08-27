@@ -18,12 +18,15 @@ const (
 
 // Context carries global CLI options and I/O for one command invocation.
 type Context struct {
-	ConfigDir string
-	DataDir   string
-	DryRun    bool
-	JSON      bool
-	Quiet     bool
-	Yes       bool
+	ConfigDir        string
+	DataDir          string
+	EstablishmentURL string
+	AdminToken       string
+	SigningKeyFile   string
+	DryRun           bool
+	JSON             bool
+	Quiet            bool
+	Yes              bool
 
 	Stdin  io.Reader
 	Stdout io.Writer

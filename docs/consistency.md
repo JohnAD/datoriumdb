@@ -16,6 +16,9 @@
   members catch up asynchronously.
 - **`distributionComplete` is a hint, never an error.** Clients may use it to
   skip polling when true, but must not treat false as a failed write.
+- **Binary attachments follow the same hint.** File create/update/delete set
+  `distributionComplete` from binary replication only; known-stale file reads
+  refuse with `fileStale`. See [Binary Attachment Storage](../tech-docs/BINARY-FILES.md).
 - **Writes are version-checked.** `patch` and `delete` require the exact
   current `#` version; a stale version is refused with `versionMismatch`. See
   [Atomic Updates and Batching](atomic-updates.md).

@@ -1,0 +1,13 @@
+{
+  "collection": "Movies",
+  "command": "fileCreate",
+  "errors": [
+    {
+      "code": "invalidFileName",
+      "message": "file name is invalid or unsafe for filesystem storage"
+    }
+  ],
+  "filename": ".hidden",
+  "id": "fixedidfile04",
+  "ok": false
+}

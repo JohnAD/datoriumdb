@@ -2,7 +2,10 @@
 
 This document describes the administrative command-line tools for DatoriumDB.
 
-These tools are separate from the access language. The access language is for document operations such as `create`, `read`, `patch`, and `delete`. Administrative tasks such as creating collections, changing schemas, and updating establishment config files are performed by command-line tools.
+These tools are separate from ordinary document access commands (`create`,
+`read`, `patch`, `delete`). Catalog mutations (collections and searches) share
+the establishment admin `/command` API with smart clients; other config
+operations may still edit `--config-dir` locally.
 
 ## Purpose
 
@@ -11,13 +14,16 @@ Command-line tools should make config and schema changes explicit, validated, an
 They should:
 
 - validate requested changes before writing files
-- write plain JSON config files under `/db/.config`
+- write plain JSON config files under `/db/.config` (via the establishment
+  admin API for collection/search mutations)
 - preserve readable, stable formatting for Git diffs
 - use safe file replacement so readers do not observe partially written config
 - preserve versioned schema history
 - increment `general.version` when the served establishment config changes
 
-The establishment server serves the resulting files; it does not provide a general write API for editing them. Collection creation and schema upgrades are also command-line tool responsibilities. They are not access-language commands and are not general server-to-server API operations.
+Collection and search mutations are not a free-form filesystem write API for
+operators: `datoriumctl` posts admin commands to a live establishment server,
+which performs the only supported config write path for those changes.
 
 ## Tool Name And Invocation
 
@@ -49,12 +55,15 @@ Unless a command says otherwise, these options are available everywhere:
 
 - `--config-dir <path>`: directory containing establishment config files. Defaults to `/db/.config`.
 - `--data-dir <path>`: local collection storage root. Defaults to the parent of `--config-dir` when that directory is named `.config`, otherwise `/db`.
-- `--dry-run`: validate and report the intended file changes without writing anything.
+- `--establishment-url <url>` / `DATORIUMDB_ESTABLISHMENT_URL`: required for collection/search **mutate** commands (HTTP admin API).
+- `--admin-token <jwt>` / `DATORIUMDB_ADMIN_TOKEN`: admin bearer for mutate commands.
+- `--signing-key-file <path>` / `DATORIUMDB_SIGNING_KEY_FILE`: alternative to `--admin-token`; CLI mints a short-lived admin token using `--config-dir` auth material.
+- `--dry-run`: validate and report the intended change without writing (mutate commands skip the HTTP POST).
 - `--json`: print machine-readable JSON envelopes to stdout.
 - `--quiet`: suppress non-error human output.
 - `--yes`: skip interactive confirmation prompts for destructive or irreversible operations.
 
-The CLI always operates on the config directory named by `--config-dir`. It does not talk to live DatoriumDB servers for MVP admin writes.
+Collection/search **create, upgrade, and delete** talk to a live establishment server via the admin `/command` API (sole mutation path). Read-only commands (`collection list|show`, `search list`) and other config tools still operate on `--config-dir` files.
 
 ## Output And Exit Codes
 
@@ -251,50 +260,35 @@ With `--json`, return a compact summary object rather than the full establishmen
 
 ### `collection create`
 
-Create a new collection from an initial schema file.
+Create a new collection from an initial schema file by POSTing `collectionEnsure`
+to the establishment server (admin JWT required).
 
 ```text
-datoriumctl collection create <CollectionName> <schema-file.json> [--config-dir /db/.config] [--data-dir /db] [--dry-run]
+datoriumctl collection create <CollectionName> <schema-file.json> \
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN" \
+  [--dry-run]
 ```
 
-Behavior:
+The establishment server validates the schema, writes
+`{CollectionName}.schema.json` and `{CollectionName}.schema.0.json`, creates
+the local collection data directory, and bumps `general.version`. Document
+migration is not involved for a new empty collection.
 
-1. Reject the command if `{CollectionName}.schema.json` already exists.
-2. Load and compile the schema file as strict JSON OJSON.
-3. Require root `kind: object`.
-4. Validate the complete candidate config with the new collection included.
-5. Write:
-   - `{CollectionName}.schema.json`
-   - `{CollectionName}.schema.0.json`
-6. Create the empty local collection directory `{data-dir}/{CollectionName}` as soon as the schema files are written, if it does not already exist.
-7. Increment `general.version`.
-
-Example schema file:
-
-```json
-{
-  "kind": "object",
-  "children": [
-    {"name": "title", "kind": "string", "required": true},
-    {"name": "releaseYear", "kind": "number", "integer": true},
-    {"name": "status", "kind": "string"},
-    {"name": "highRated", "kind": "boolean", "default": false}
-  ]
-}
-```
-
-The initial schema version is always `0`.
-
-`collection create` prepares local storage on the machine where the CLI runs, typically the establishment server. It does not remotely create directories on other nodes.
-
-In multi-node systems, each `datoriumdb` server creates any missing local collection directories as soon as it learns about those collections from the establishment server. That happens on startup and whenever the server refreshes establishment config. Creating a missing directory is idempotent: if the directory already exists, the server leaves it alone.
+The initial schema version is always `0`. Idempotent when the collection
+already exists with an equivalent schema (`changed: false`).
 
 ### `collection upgrade`
 
-Advance an existing collection schema by exactly one version.
+Advance an existing collection schema by exactly one version via
+`collectionEnsure` (admin HTTP). Multi-version jumps require multiple CLI
+invocations.
 
 ```text
-datoriumctl collection upgrade <CollectionName> <upgrade-file.json> [--config-dir /db/.config] [--dry-run]
+datoriumctl collection upgrade <CollectionName> <upgrade-file.json> \
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN" \
+  [--dry-run]
 ```
 
 `<upgrade-file.json>` is only an input path. Its filename can be anything; the CLI reads the file contents. The files written under `--config-dir` still use the fixed names `{CollectionName}.schema.json` and `{CollectionName}.schema.{ver}.json`.
@@ -530,7 +524,7 @@ Behavior:
 Issue a short-lived client or machine token for MVP bootstrap and demos.
 
 ```text
-datoriumctl auth token issue --kind client|machine [--subject <string>] [--server-name <serverName>] [--lifetime-seconds <n>] [--config-dir /db/.config]
+datoriumctl auth token issue --kind client|machine|admin [--subject <string>] [--server-name <serverName>] [--lifetime-seconds <n>] [--config-dir /db/.config]
 ```
 
 Behavior:
@@ -549,7 +543,12 @@ This command is an operator tool, not a user-management system. It must never wr
 Create an immutable precompiled search definition.
 
 ```text
-datoriumctl search create <CollectionName> <SearchName> <search-definition-file.json> [--config-dir /db/.config] [--data-dir /db] [--dry-run]
+```text
+datoriumctl search create <CollectionName> <SearchName> <search-definition-file.json> \
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN" \
+  [--dry-run]
+```
 ```
 
 Behavior:
@@ -567,7 +566,12 @@ For the MVP, search definitions are immutable after create. To change a search, 
 Delete a search definition.
 
 ```text
-datoriumctl search delete <CollectionName> <SearchName> [--config-dir /db/.config] [--yes] [--dry-run]
+```text
+datoriumctl search delete <CollectionName> <SearchName> \
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN" \
+  [--yes] [--dry-run]
+```
 ```
 
 Behavior:

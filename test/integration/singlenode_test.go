@@ -40,7 +40,7 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 	token := testutil.ClientToken(t, cfg, "integration-test-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, srv.BaseURL, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}`)
+	created, err := testutil.PostCommand(ctx, srv.BaseURL, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "The Matrix", "releaseYear": 1999})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 		t.Fatalf("expected id/version in create response: %#v", created)
 	}
 
-	read, err := testutil.PostCommand(ctx, srv.BaseURL, token, `read Movies `+id+` {}`)
+	read, err := testutil.PostCommand(ctx, srv.BaseURL, token, "read", "Movies", id, map[string]any{})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 		t.Fatalf("unexpected read payload: %#v", read)
 	}
 
-	patched, err := testutil.PostCommand(ctx, srv.BaseURL, token, `patch Movies `+id+` {$: Movies:0, #: `+ver+`, RFC6902: [{op: add, path: /status, value: released}]}`)
+	patched, err := testutil.PostCommand(ctx, srv.BaseURL, token, "patch", "Movies", id, map[string]any{"$": "Movies:0", "#": ver, "RFC6902": []any{map[string]any{"op": "add", "path": "/status", "value": "released"}}})
 	if err != nil {
 		t.Fatalf("patch: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestSingleNodeCRUDLifecycle(t *testing.T) {
 
 	testutil.AssertFileExists(t, dataDirDocPath(dataDir, "Movies", id))
 
-	deleted, err := testutil.PostCommand(ctx, srv.BaseURL, token, `delete Movies `+id+` {#: `+afterVer+`}`)
+	deleted, err := testutil.PostCommand(ctx, srv.BaseURL, token, "delete", "Movies", id, map[string]any{"#": afterVer})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSingleNodeUnauthenticatedCommandRefused(t *testing.T) {
 		DataDir:          testutil.TempDataDir(t),
 	})
 
-	res, err := testutil.PostCommand(context.Background(), srv.BaseURL, "", `create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "The Matrix"}`)
+	res, err := testutil.PostCommand(context.Background(), srv.BaseURL, "", "create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "The Matrix"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

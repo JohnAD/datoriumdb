@@ -35,7 +35,7 @@ func TestComposeDegradedReplicationRecovers(t *testing.T) {
 		t.Fatalf("stop serverB: %v\n%s", err, out)
 	}
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Degraded Replication Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "Degraded Replication Test"})
 	if err != nil {
 		t.Fatalf("create while serverB is down: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestComposeDegradedReplicationRecovers(t *testing.T) {
 	// This topology's fixture sets readMemberCheckinSeconds: 3, so
 	// catch-up should complete within a handful of seconds.
 	testutil.PollUntilErr(t, 30*time.Second, 500*time.Millisecond, func() error {
-		res, err := testutil.PostCommand(ctx, baseB, token, `read Movies `+id+` {}`)
+		res, err := testutil.PostCommand(ctx, baseB, token, "read", "Movies", id, map[string]any{})
 		if err != nil {
 			return err
 		}

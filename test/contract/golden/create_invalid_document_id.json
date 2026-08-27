@@ -7,6 +7,6 @@
       "message": "document id is invalid or unsafe for filesystem storage"
     }
   ],
-  "id": "\"not/safe\"",
+  "id": "not/safe",
   "ok": false
 }

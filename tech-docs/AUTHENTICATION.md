@@ -178,18 +178,19 @@ MVP tokens use these claims:
 | `sub` | yes | subject identity string |
 | `iat` | yes | issued-at time |
 | `exp` | yes | expiration time |
-| `datoriumdb.kind` | yes | `client` or `machine` |
+| `datoriumdb.kind` | yes | `client`, `machine`, or `admin` |
 | `datoriumdb.serverName` | machine only | server name matching `__servers.json` |
 
 The JWT header should include `kid` matching an active or retired public key in `__auth.json`.
 
 MVP authorization is authentication only:
 
-- any valid client or machine token with correct `iss`, `aud`, and `exp` may call smart-client endpoints such as `/command` and `/establish`
+- any valid client, machine, or admin token with correct `iss`, `aud`, and `exp` may call smart-client endpoints such as `/establish` and ordinary `/command` CRUD
+- **admin** commands (`collectionEnsure`, `searchEnsure`, `searchDelete`) require `datoriumdb.kind` = `admin` and must be sent to the **establishment server**
 - server-to-server `/sys` endpoints require `datoriumdb.kind` = `machine`
 - the authenticated `datoriumdb.serverName` must match the `serverName` whose work is requested, fetched, applied, or deleted
 
-Stable auth error codes include `unauthenticated`, `invalidToken`, `tokenExpired`, and `machineIdentityMismatch`.
+Stable auth error codes include `unauthenticated`, `invalidToken`, `tokenExpired`, `machineIdentityMismatch`, `adminRequired`, and `establishmentRequired`.
 
 Client tokens may eventually include collection-level or operation-level authorization, but partial schema visibility by authorization scope is not part of the MVP.
 
@@ -212,7 +213,7 @@ These are short-lived access tokens, not long-lived credentials. Machines should
 
 ## Token Issuance
 
-For the MVP, `datoriumctl` can issue client and machine tokens. This is an operator bootstrap and demo path, not a full identity or user-management system.
+For the MVP, `datoriumctl` can issue client, machine, and admin tokens. This is an operator bootstrap and demo path, not a full identity or user-management system.
 
 Token signing uses a private key kept outside `/db/.config`, typically provided by:
 

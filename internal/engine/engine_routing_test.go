@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/shard"
 )
@@ -69,13 +70,13 @@ func TestWriteRoutesToSOTOnly(t *testing.T) {
 	highID := idInSlotRange(t, high+1, 0xFF)
 
 	// serverA is the SOT for the low range: create succeeds.
-	res := eng.Execute(`create Movies ` + lowID + ` {$: Movies:0, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", lowID, map[string]any{"$": "Movies:0", "title": "x"}))
 	if res["ok"] != true {
 		t.Fatalf("expected SOT create to succeed: %#v", res)
 	}
 
 	// serverA is not the SOT for the high range: create is refused.
-	res = eng.Execute(`create Movies ` + highID + ` {$: Movies:0, title: "x"}`)
+	res = eng.Execute(commandreq.Must("create", "Movies", highID, map[string]any{"$": "Movies:0", "title": "x"}))
 	assertWrongMachine(t, res, "create", "Movies", highID)
 }
 
@@ -86,7 +87,7 @@ func TestReadRoutesToReadMemberOnly(t *testing.T) {
 	// serverA is the SOT, but only serverB is SHARD_READ_MEMBER for the
 	// low range: a read on serverA is refused even though it holds the
 	// source-of-truth copy.
-	res := eng.Execute(`read Movies ` + lowID + ` {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	assertWrongMachine(t, res, "read", "Movies", lowID)
 }
 
@@ -98,7 +99,7 @@ func TestReadSucceedsOnAssignedReadMember(t *testing.T) {
 	// through (it fails downstream with documentNotFound, not
 	// wrongMachine, because nothing was ever replicated to it in this
 	// unit test).
-	res := eng.Execute(`read Movies ` + lowID + ` {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected read to fail (no document), got ok:true: %#v", res)
 	}
@@ -113,7 +114,7 @@ func TestProxyReadMemberIsNotANormalReadTarget(t *testing.T) {
 
 	// analysisA is PROXY_READ_MEMBER only for the low range, never
 	// SHARD_READ_MEMBER: normal smart-client reads must still be refused.
-	res := eng.Execute(`read Movies ` + lowID + ` {}`)
+	res := eng.Execute(commandreq.Must("read", "Movies", lowID, map[string]any{}))
 	assertWrongMachine(t, res, "read", "Movies", lowID)
 }
 
@@ -121,7 +122,7 @@ func TestWriteRefusedOnReadOnlyMember(t *testing.T) {
 	eng, low, high := multiServerEngine(t, "serverB")
 	lowID := idInSlotRange(t, low, high)
 
-	res := eng.Execute(`create Movies ` + lowID + ` {$: Movies:0, title: "x"}`)
+	res := eng.Execute(commandreq.Must("create", "Movies", lowID, map[string]any{"$": "Movies:0", "title": "x"}))
 	assertWrongMachine(t, res, "create", "Movies", lowID)
 }
 
@@ -130,12 +131,12 @@ func TestDualRoleServerServesBothReadsAndWrites(t *testing.T) {
 	// both SHARD_SOT_MEMBER and SHARD_READ_MEMBER for 00-FF) must not
 	// need any wrongMachine bounce for either command.
 	eng := testEngine(t)
-	created := eng.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "x"}`)
+	created := eng.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "x"}))
 	if created["ok"] != true {
 		t.Fatalf("expected dual-role create to succeed: %#v", created)
 	}
 	id, _ := created["id"].(string)
-	read := eng.Execute(`read Movies ` + id + ` {}`)
+	read := eng.Execute(commandreq.Must("read", "Movies", id, map[string]any{}))
 	if read["ok"] != true {
 		t.Fatalf("expected dual-role read to succeed: %#v", read)
 	}

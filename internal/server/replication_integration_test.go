@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/JohnAD/datoriumdb/internal/agents/change"
 	"github.com/JohnAD/datoriumdb/internal/auth"
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/engine"
@@ -144,10 +146,58 @@ func localDocGone(eng *engine.Engine, collection, id string) bool {
 
 // --- happy path: one-shot live delivery for create/patch/delete ----
 
+func TestReplicationHappyPathFileCreateUpdateDelete(t *testing.T) {
+	topo := newReplicationTopology(t)
+	created := topo.sot.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
+	if created["ok"] != true {
+		t.Fatalf("create: %#v", created)
+	}
+	id, _ := created["id"].(string)
+
+	payload := []byte("file-bytes-v1")
+	put := topo.sot.PutFile(bytes.NewReader(payload), "Movies", id, "poster.png", engine.PutFileOptions{ContentType: "image/png"})
+	if put["ok"] != true {
+		t.Fatalf("put: %#v", put)
+	}
+	if put["distributionComplete"] != true {
+		t.Fatalf("expected file distributionComplete: %#v", put)
+	}
+	ver, _ := put["version"].(string)
+
+	entries, err := fsstore.ReadFilesManifest(topo.read.DataDir, "Movies", id)
+	if err != nil || len(entries) != 1 || entries[0].Version != ver {
+		t.Fatalf("read replica manifest %#v err=%v", entries, err)
+	}
+	raw, err := os.ReadFile(fsstore.BinaryPath(topo.read.DataDir, "Movies", id, "poster.png"))
+	if err != nil || string(raw) != string(payload) {
+		t.Fatalf("read replica bytes %q err=%v", raw, err)
+	}
+
+	updated := []byte("file-bytes-v2")
+	upd := topo.sot.PutFile(bytes.NewReader(updated), "Movies", id, "poster.png", engine.PutFileOptions{ContentType: "image/png", IfMatch: ver})
+	if upd["ok"] != true {
+		t.Fatalf("update: %#v", upd)
+	}
+	newVer, _ := upd["version"].(string)
+	raw, _ = os.ReadFile(fsstore.BinaryPath(topo.proxy.DataDir, "Movies", id, "poster.png"))
+	if string(raw) != string(updated) {
+		t.Fatalf("proxy bytes %q", raw)
+	}
+
+	del := topo.sot.DeleteFile("Movies", id, "poster.png", newVer, "")
+	if del["ok"] != true {
+		t.Fatalf("delete: %#v", del)
+	}
+	entries, _ = fsstore.ReadFilesManifest(topo.read.DataDir, "Movies", id)
+	if len(entries) != 0 {
+		t.Fatalf("expected empty manifest on read: %#v", entries)
+	}
+}
+
 func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 	topo := newReplicationTopology(t)
 
-	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix"}`)
+	created := topo.sot.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "The Matrix"}))
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}
@@ -177,12 +227,15 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 		}
 	}
 
-	readResult := topo.read.Execute(`read Movies ` + id + ` {}`)
+	readResult := topo.read.Execute(commandreq.Must("read", "Movies", id, map[string]any{}))
 	if readResult["ok"] != true {
 		t.Fatalf("expected read-member to serve the replicated document: %#v", readResult)
 	}
 
-	patched := topo.sot.Execute(`patch Movies ` + id + ` {$: Movies:0, #: ` + ver + `, RFC6902: [{op: add, path: /status, value: released}]}`)
+	patched := topo.sot.Execute(commandreq.Must("patch", "Movies", id, map[string]any{
+		"$": "Movies:0", "#": ver,
+		"RFC6902": []any{map[string]any{"op": "add", "path": "/status", "value": "released"}},
+	}))
 	if patched["ok"] != true {
 		t.Fatalf("expected patch to succeed: %#v", patched)
 	}
@@ -207,7 +260,7 @@ func TestReplicationHappyPathCreatePatchDelete(t *testing.T) {
 		t.Fatalf("expected patch to replicate to proxy-member: %#v", proxyDoc)
 	}
 
-	deleted := topo.sot.Execute(`delete Movies ` + id + ` {#: ` + afterVer + `}`)
+	deleted := topo.sot.Execute(commandreq.Must("delete", "Movies", id, map[string]any{"#": afterVer}))
 	if deleted["ok"] != true {
 		t.Fatalf("expected delete to succeed: %#v", deleted)
 	}
@@ -232,7 +285,7 @@ func TestReplicationOneShotDownMemberPendingAndNote(t *testing.T) {
 	topo := newReplicationTopology(t)
 	topo.readTS.Close()
 
-	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "Down Member Test"}`)
+	created := topo.sot.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000002", map[string]any{"$": "Movies:0", "title": "Down Member Test"}))
 	if created["ok"] != true {
 		t.Fatalf("expected SOT-local success even though a read-member is down: %#v", created)
 	}
@@ -287,7 +340,7 @@ func TestCatchUpAppliesPendingWriteAndCleansUpAfterRestart(t *testing.T) {
 	topo := newReplicationTopology(t)
 	topo.readTS.Close()
 
-	created := topo.sot.Execute(`create Movies 01TESTMOVIES00000000000003 {$: Movies:0, title: "Catch Up Test"}`)
+	created := topo.sot.Execute(commandreq.Must("create", "Movies", "01TESTMOVIES00000000000003", map[string]any{"$": "Movies:0", "title": "Catch Up Test"}))
 	if created["ok"] != true {
 		t.Fatalf("expected create to succeed: %#v", created)
 	}

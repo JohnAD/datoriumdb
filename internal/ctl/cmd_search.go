@@ -1,10 +1,8 @@
 package ctl
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/JohnAD/datoriumdb/internal/config"
@@ -22,59 +20,37 @@ func cmdSearchCreate(ctx *Context, args []string) Outcome {
 		return ValidationFailSimple("search.create", "invalidJSON", fmt.Sprintf("cannot read search definition file: %v", err))
 	}
 
-	mutate := func(cfg *config.Config) (*Plan, map[string]any, []envelope.Error) {
-		fields := map[string]any{"collection": collection, "search": name}
-		if _, exists := cfg.Searches[collection][name]; exists {
-			return nil, fields, []envelope.Error{{Code: "searchAlreadyExists", Message: "search definition already exists", Actual: name}}
-		}
-		if errs := config.ValidateSearchDefinition(raw, collection, name, cfg.Schemas); len(errs) > 0 {
-			return nil, fields, errs
-		}
-		if def, err := search.ParseDefinition(raw); err == nil {
-			if schemaRaw, ok := cfg.Schemas[collection]; ok {
-				if compiled, cerr := config.CompileSchemaBytes(schemaRaw); cerr == nil {
-					if verrs := def.Validate(compiled.Root(), cfg.Schemas); len(verrs) > 0 {
-						return nil, fields, verrs
-					}
+	fields := map[string]any{"collection": collection, "search": name}
+	cfg, outcome, ok := loadReadOnly(ctx, "search.create")
+	if !ok {
+		return outcome
+	}
+	if _, exists := cfg.Searches[collection][name]; exists {
+		return ValidationFail(fields, envelope.Error{Code: "searchAlreadyExists", Message: "search definition already exists", Actual: name})
+	}
+	if errs := config.ValidateSearchDefinition(raw, collection, name, cfg.Schemas); len(errs) > 0 {
+		return ValidationFail(fields, errs...)
+	}
+	if def, err := search.ParseDefinition(raw); err == nil {
+		if schemaRaw, ok := cfg.Schemas[collection]; ok {
+			if compiled, cerr := config.CompileSchemaBytes(schemaRaw); cerr == nil {
+				if verrs := def.Validate(compiled.Root(), cfg.Schemas); len(verrs) > 0 {
+					return ValidationFail(fields, verrs...)
 				}
 			}
 		}
-		pretty, err := ReindentJSON(raw)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "invalidJSON", Message: err.Error()}}
-		}
-		if cfg.Searches[collection] == nil {
-			cfg.Searches[collection] = map[string]json.RawMessage{}
-		}
-		cfg.Searches[collection][name] = json.RawMessage(pretty)
-		if cfg.SearchHistory[collection] == nil {
-			cfg.SearchHistory[collection] = map[string]map[int]json.RawMessage{}
-		}
-		if cfg.SearchHistory[collection][name] == nil {
-			cfg.SearchHistory[collection][name] = map[int]json.RawMessage{}
-		}
-		cfg.SearchHistory[collection][name][1] = json.RawMessage(pretty)
-		if cfg.SearchVersions[collection] == nil {
-			cfg.SearchVersions[collection] = map[string]int{}
-		}
-		cfg.SearchVersions[collection][name] = 1
-		if errs := cfg.ValidateDetailed(); len(errs) > 0 {
-			return nil, fields, errs
-		}
-
-		plan := &Plan{}
-		plan.AddWrite(searchPath(cfg, collection, name), pretty)
-		plan.AddWrite(searchVersionPath(cfg, collection, name, 1), pretty)
-		plan.AddDir(filepath.Join(ctx.DataDir, collection, ".search", name))
-		nextVersion, err := stageGeneralBump(plan, cfg)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "filesystemError", Message: err.Error()}}
-		}
-		fields["searchVersion"] = 1
-		fields["generalVersion"] = nextVersion
-		return plan, fields, nil
 	}
-	return runMutation(ctx, "search.create", mutate)
+	defObj, outcome, ok := parseJSONObject(raw)
+	if !ok {
+		outcome.Result["command"] = "search.create"
+		return outcome
+	}
+
+	out := postAdminCommand(ctx, "searchEnsure", collection, name, defObj)
+	if out.Result != nil {
+		out.Result["command"] = "search.create"
+	}
+	return out
 }
 
 func cmdSearchDelete(ctx *Context, args []string) Outcome {
@@ -83,28 +59,11 @@ func cmdSearchDelete(ctx *Context, args []string) Outcome {
 	}
 	collection, name := args[0], args[1]
 
-	mutate := func(cfg *config.Config) (*Plan, map[string]any, []envelope.Error) {
-		fields := map[string]any{"collection": collection, "search": name}
-		if _, exists := cfg.Searches[collection][name]; !exists {
-			return nil, fields, []envelope.Error{{Code: "searchNotFound", Message: "search definition does not exist", Actual: name}}
-		}
-		if !confirm(ctx, fmt.Sprintf("Delete search %q on collection %q?", name, collection)) {
-			return nil, fields, []envelope.Error{{Code: "cancelled", Message: "operation cancelled; pass --yes to skip confirmation"}}
-		}
-		delete(cfg.Searches[collection], name)
-		if errs := cfg.ValidateDetailed(); len(errs) > 0 {
-			return nil, fields, errs
-		}
-		plan := &Plan{}
-		plan.AddRemove(searchPath(cfg, collection, name))
-		nextVersion, err := stageGeneralBump(plan, cfg)
-		if err != nil {
-			return nil, fields, []envelope.Error{{Code: "filesystemError", Message: err.Error()}}
-		}
-		fields["generalVersion"] = nextVersion
-		return plan, fields, nil
+	out := postAdminCommand(ctx, "searchDelete", collection, name, map[string]any{})
+	if out.Result != nil {
+		out.Result["command"] = "search.delete"
 	}
-	return runMutation(ctx, "search.delete", mutate)
+	return out
 }
 
 func cmdSearchList(ctx *Context, _ []string) Outcome {

@@ -85,11 +85,12 @@ document it per application. Note that number range search operators are not
 yet implemented, so range queries over timestamps are not currently available
 regardless of representation.
 
-**Maximum document size.** The access-language command body is capped at
-**1 MiB** on `/datoriumdb/v1/command` (the auth endpoint is capped at
-16 KiB). Because `create` carries the whole document inline in the command,
-**1 MiB is the effective maximum document content size**. There is no
-separate per-document limit in storage.
+**Maximum document size.** The JSON command body (and multipart `command`
+metadata part) is capped at **1 MiB** on `/datoriumdb/v1/command` (the auth
+endpoint is capped at 16 KiB). Because `create` carries the whole document
+inline in `detail`, **1 MiB is the effective maximum document content size**.
+There is no separate per-document limit in storage. Binary attachments use a
+separate `maxFileBytes` limit (default 1 GiB).
 
 **String limits.** No global string cap; use per-field `max_length` (runes)
 in the schema. Search-specific: variable-value `equals` and array `contains`

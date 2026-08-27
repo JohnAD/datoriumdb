@@ -61,6 +61,13 @@ After the `change-agent` successfully distributes the change, it deletes the pre
 
 Delete operations use the previous-document dotfile plus an explicit delete queue entry. The absence of `{id}.json` alone is not used as the only signal that a delete occurred.
 
+## Binary attachments
+
+Document-scoped binaries live under `lfs/{docId}/` with a sibling
+`{docId}__files.jsonl` manifest. Layout, validation, journaling, and
+replication are specified in [BINARY-FILES.md](BINARY-FILES.md). Parent
+document delete cascades attachment cleanup.
+
 Change queue entries are stored in `.changeQueue` under the collection storage location. Queue filenames include the collection, document ID, and change type:
 
 ```text

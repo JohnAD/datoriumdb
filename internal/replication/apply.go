@@ -99,7 +99,9 @@ func (a *Applier) applyPatch(item DocumentWorkItem) (bool, error) {
 func (a *Applier) applyDelete(item DocumentWorkItem) (bool, error) {
 	path := fsstore.DocumentPath(a.DataDir, item.Collection, item.ID)
 	if _, err := fsstore.ReadDocumentJSON(path); err != nil {
-		return true, nil // already applied (already gone)
+		// Already gone: still cascade attachments idempotently.
+		_ = fsstore.CascadeDeleteDocumentFiles(a.DataDir, item.Collection, item.ID)
+		return true, nil
 	}
 	if err := fsstore.SoftDeleteDocument(a.DataDir, item.Collection, item.ID); err != nil {
 		return false, err

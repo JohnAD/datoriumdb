@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JohnAD/datoriumdb/internal/accesslang"
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/config"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/envelope"
@@ -46,7 +46,7 @@ type DistributionResult struct {
 	Err      error
 }
 
-// Engine executes access-language commands against local filesystem storage.
+// Engine executes public JSON commands against local filesystem storage.
 type Engine struct {
 	ConfigDir  string
 	DataDir    string
@@ -92,43 +92,54 @@ func (e *Engine) Reload() error {
 	return nil
 }
 
-// Execute parses and runs one access-language command.
-func (e *Engine) Execute(line string) envelope.Result {
-	cmd, err := accesslang.Parse(line)
+// Execute runs one public JSON command request.
+func (e *Engine) Execute(req commandreq.Request) envelope.Result {
+	detail, err := req.DetailMap()
 	if err != nil {
-		return envelope.Fail(map[string]any{"command": "unknown"}, envelope.Error{
-			Code:    "invalidCommand",
-			Message: err.Error(),
-		})
-	}
-	detail, err := accesslang.ParseDetail(cmd.Detail)
-	if err != nil {
-		return envelope.Fail(map[string]any{"command": cmd.Word}, envelope.Error{
+		return envelope.Fail(map[string]any{"command": req.Command}, envelope.Error{
 			Code:    "invalidDetail",
 			Message: err.Error(),
 		})
 	}
-	switch cmd.Word {
+	switch req.Command {
 	case "create":
-		return e.create(cmd, detail)
+		return e.create(req, detail)
 	case "read":
-		return e.read(cmd, detail)
+		return e.read(req, detail)
 	case "patch":
-		return e.patch(cmd, detail)
+		return e.patch(req, detail)
 	case "delete":
-		return e.delete(cmd, detail)
+		return e.delete(req, detail)
 	case "search":
-		return e.search(cmd, detail)
+		return e.search(req, detail)
+	case "collectionEnsure":
+		return e.collectionEnsure(req, detail)
+	case "searchEnsure":
+		return e.searchEnsure(req, detail)
+	case "searchDelete":
+		return e.searchDeleteCmd(req)
+	case "fileCreate", "fileUpdate":
+		return envelope.Fail(map[string]any{"command": req.Command}, envelope.Error{
+			Code:    "contentTypeRequired",
+			Message: "fileCreate and fileUpdate require multipart/form-data with a command JSON part and a content part",
+		})
+	case "fileRead", "fileList", "fileDelete":
+		// Handled by the HTTP layer for streaming responses / file-specific
+		// validation; engine methods are called directly from the server.
+		return envelope.Fail(map[string]any{"command": req.Command}, envelope.Error{
+			Code:    "invalidRequest",
+			Message: "file commands must be dispatched by the HTTP command handler",
+		})
 	default:
-		return envelope.Fail(map[string]any{"command": cmd.Word}, envelope.Error{
+		return envelope.Fail(map[string]any{"command": req.Command}, envelope.Error{
 			Code:    "unknownCommand",
 			Message: "unsupported command",
 		})
 	}
 }
 
-func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.Result {
-	collection := cmd.Target
+func (e *Engine) create(req commandreq.Request, detail map[string]any) envelope.Result {
+	collection := req.Target
 	schemaRaw, ok := e.Cfg.Schemas[collection]
 	if !ok {
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection}, envelope.Error{
@@ -136,7 +147,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 			Message: "collection does not exist",
 		})
 	}
-	id := cmd.Parm
+	id := req.Parameter
 	if id == "" || id == "null" {
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
 			Code:    "documentIdRequired",
@@ -152,7 +163,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 	if wrong := e.checkRouting(id, "create", collection); wrong != nil {
 		return *wrong
 	}
-	opID := stringField(detail, "operationId")
+	opID := commandreq.StringField(detail, "operationId")
 	if opID == "" {
 		var err error
 		opID, err = e.ids().New()
@@ -209,7 +220,7 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 			Message: err.Error(),
 		})
 	}
-	docBytes, err := canonicalCreateDocument(schemaRaw, cmd.Detail, id, marker, version)
+	docBytes, err := canonicalCreateDocument(schemaRaw, req.Detail, id, marker, version)
 	if err != nil {
 		return envelope.Fail(map[string]any{"command": "create", "collection": collection, "id": id}, envelope.Error{
 			Code:    "documentEncodeFailed",
@@ -269,9 +280,9 @@ func (e *Engine) create(cmd accesslang.Command, detail map[string]any) envelope.
 	return e.deliverOnce(item, result)
 }
 
-func (e *Engine) read(cmd accesslang.Command, detail map[string]any) envelope.Result {
-	collection := cmd.Target
-	id := cmd.Parm
+func (e *Engine) read(req commandreq.Request, detail map[string]any) envelope.Result {
+	collection := req.Target
+	id := req.Parameter
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "read", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDocumentId",
@@ -315,10 +326,10 @@ func (e *Engine) read(cmd accesslang.Command, detail map[string]any) envelope.Re
 	return envelope.OK(out)
 }
 
-func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.Result {
-	collection := cmd.Target
-	id := cmd.Parm
-	opID := stringField(detail, "operationId")
+func (e *Engine) patch(req commandreq.Request, detail map[string]any) envelope.Result {
+	collection := req.Target
+	id := req.Parameter
+	opID := commandreq.StringField(detail, "operationId")
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDocumentId",
@@ -380,7 +391,7 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 			Actual:   bang,
 		})
 	}
-	detailValue, err := accesslang.ParseDetailValue(cmd.Detail)
+	detailValue, err := ojson.ReadBytesNoSchema(req.Detail)
 	if err != nil {
 		return envelope.Fail(map[string]any{"command": "patch", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDetail",
@@ -525,9 +536,9 @@ func (e *Engine) patch(cmd accesslang.Command, detail map[string]any) envelope.R
 	return e.deliverOnce(item, result)
 }
 
-func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.Result {
-	collection := cmd.Target
-	id := cmd.Parm
+func (e *Engine) delete(req commandreq.Request, detail map[string]any) envelope.Result {
+	collection := req.Target
+	id := req.Parameter
 	if !idgen.ValidDocumentID(id) || !fsstore.SafeID(id) {
 		return envelope.Fail(map[string]any{"command": "delete", "collection": collection, "id": id}, envelope.Error{
 			Code:    "invalidDocumentId",
@@ -563,7 +574,7 @@ func (e *Engine) delete(cmd accesslang.Command, detail map[string]any) envelope.
 			Actual:   actualVer,
 		})
 	}
-	opID := stringField(detail, "operationId")
+	opID := commandreq.StringField(detail, "operationId")
 	if opID == "" {
 		opID, err = e.ids().New()
 		if err != nil {
@@ -743,11 +754,6 @@ func (e *Engine) deliverOnce(item replication.DocumentWorkItem, result envelope.
 	}
 	result["distributionComplete"] = docComplete && derivedComplete
 	return result
-}
-
-func stringField(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
 }
 
 func currentSchemaMarker(collection string, cfg *config.Config) string {

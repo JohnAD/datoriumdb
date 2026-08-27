@@ -103,7 +103,7 @@ func (v *Validator) ParseToken(raw string) (Claims, error) {
 		return Claims{}, errInvalidToken("token is missing the " + ClaimKind + " claim")
 	}
 	switch Kind(kindRaw) {
-	case KindClient, KindMachine:
+	case KindClient, KindMachine, KindAdmin:
 		claims.Kind = Kind(kindRaw)
 	default:
 		return Claims{}, errInvalidToken("token has an unknown " + ClaimKind + " claim: " + kindRaw)
@@ -118,6 +118,19 @@ func (v *Validator) ParseToken(raw string) (Claims, error) {
 	}
 
 	return claims, nil
+}
+
+// RequireAdmin returns a *Error with code "adminRequired" if claims does not
+// represent an admin token.
+func RequireAdmin(claims Claims) *Error {
+	if claims.Kind != KindAdmin {
+		return errAdminRequired("this endpoint requires an admin token")
+	}
+	return nil
+}
+
+func errAdminRequired(msg string) *Error {
+	return &Error{Code: "adminRequired", Message: msg}
 }
 
 // RequireMachine returns a *Error with code "machineIdentityMismatch" if

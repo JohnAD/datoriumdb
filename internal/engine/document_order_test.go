@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
 
@@ -48,14 +49,33 @@ func TestCreatePersistsEnforcedSOTFieldOrderAndPreservesExtras(t *testing.T) {
 	}
 
 	// Scramble meta, top-level schema field position, nested item fields,
-	// and include two extras in a deliberate relative order.
-	cmd := `create IPv4Lookups 1-24 {
-		ranges: [{location: null, jurisdiction: cn, asn: 4837, to: 8191, from: 0}],
-		extraZ: 1,
-		extraA: 2,
-		$: IPv4Lookups:0
-	}`
-	res := eng.Execute(cmd)
+	// and include two extras in a deliberate relative order. Use a struct
+	// so json.Marshal preserves field order in req.Detail (maps sort keys).
+	res := eng.Execute(commandreq.Must("create", "IPv4Lookups", "1-24", struct {
+		Ranges []struct {
+			Location     any    `json:"location"`
+			Jurisdiction string `json:"jurisdiction"`
+			ASN          int    `json:"asn"`
+			To           int    `json:"to"`
+			From         int    `json:"from"`
+		} `json:"ranges"`
+		ExtraZ int    `json:"extraZ"`
+		ExtraA int    `json:"extraA"`
+		Dollar string `json:"$"`
+	}{
+		Ranges: []struct {
+			Location     any    `json:"location"`
+			Jurisdiction string `json:"jurisdiction"`
+			ASN          int    `json:"asn"`
+			To           int    `json:"to"`
+			From         int    `json:"from"`
+		}{
+			{Location: nil, Jurisdiction: "cn", ASN: 4837, To: 8191, From: 0},
+		},
+		ExtraZ: 1,
+		ExtraA: 2,
+		Dollar: "IPv4Lookups:0",
+	}))
 	if res["ok"] != true {
 		t.Fatalf("create failed: %#v", res)
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/docjson"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 )
@@ -56,7 +57,7 @@ func TestReadMigratesStaleDocumentOnAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	read := eng.Execute(`read Movies id1 {}`)
+	read := eng.Execute(commandreq.Must("read", "Movies", "id1", map[string]any{}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}
@@ -82,7 +83,7 @@ func TestReadMigratesStaleDocumentOnAccess(t *testing.T) {
 	}
 
 	// A repeat read must be a no-op (idempotent, no double-migration).
-	read2 := eng.Execute(`read Movies id1 {}`)
+	read2 := eng.Execute(commandreq.Must("read", "Movies", "id1", map[string]any{}))
 	if read2["ok"] != true {
 		t.Fatalf("second read failed: %#v", read2)
 	}
@@ -105,7 +106,7 @@ func TestReadDoesNotMigrateAlreadyCurrentDocument(t *testing.T) {
 	if err := fsstore.WriteDocumentJSON(fsstore.DocumentPath(eng.DataDir, "Movies", "id1"), raw); err != nil {
 		t.Fatal(err)
 	}
-	read := eng.Execute(`read Movies id1 {}`)
+	read := eng.Execute(commandreq.Must("read", "Movies", "id1", map[string]any{}))
 	if read["ok"] != true {
 		t.Fatalf("read failed: %#v", read)
 	}

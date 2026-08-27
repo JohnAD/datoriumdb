@@ -25,6 +25,9 @@ type GeneralBody struct {
 	ReadMemberCheckinSeconds            int    `json:"readMemberCheckinSeconds"`
 	CacheUpdateCheckinSeconds           int    `json:"cacheUpdateCheckinSeconds"`
 	ReadMemberFailedCheckinsBeforeStale int    `json:"readMemberFailedCheckinsBeforeStale"`
+	// MaxFileBytes is the streamed binary attachment upload limit.
+	// Zero means the server default of 1 GiB.
+	MaxFileBytes int64 `json:"maxFileBytes,omitempty"`
 }
 
 // ServerEntry is one server definition.

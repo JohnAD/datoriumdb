@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JohnAD/datoriumdb/internal/commandreq"
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
 	"github.com/JohnAD/datoriumdb/internal/search"
 )
@@ -69,7 +70,7 @@ func TestSearchCommandReturnsIDsInStoredOrder(t *testing.T) {
 	eng := testEngineWithSearch(t)
 	seedMatches(t, eng, "released", "id1", "id2")
 
-	res := eng.Execute(`search Movies byStatus {status: released}`)
+	res := eng.Execute(commandreq.Must("search", "Movies", "byStatus", map[string]any{"status": "released"}))
 	if res["ok"] != true {
 		t.Fatalf("search failed: %#v", res)
 	}
@@ -81,7 +82,7 @@ func TestSearchCommandReturnsIDsInStoredOrder(t *testing.T) {
 
 func TestSearchCommandEmptyBucketReturnsNoIDs(t *testing.T) {
 	eng := testEngineWithSearch(t)
-	res := eng.Execute(`search Movies byStatus {status: neverUsedStatus}`)
+	res := eng.Execute(commandreq.Must("search", "Movies", "byStatus", map[string]any{"status": "neverUsedStatus"}))
 	if res["ok"] != true {
 		t.Fatalf("search failed: %#v", res)
 	}
@@ -93,7 +94,7 @@ func TestSearchCommandEmptyBucketReturnsNoIDs(t *testing.T) {
 
 func TestSearchCommandUnknownCollection(t *testing.T) {
 	eng := testEngineWithSearch(t)
-	res := eng.Execute(`search NoSuchCollection byStatus {status: released}`)
+	res := eng.Execute(commandreq.Must("search", "NoSuchCollection", "byStatus", map[string]any{"status": "released"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}
@@ -104,7 +105,7 @@ func TestSearchCommandUnknownCollection(t *testing.T) {
 
 func TestSearchCommandUnknownSearchName(t *testing.T) {
 	eng := testEngineWithSearch(t)
-	res := eng.Execute(`search Movies noSuchSearch {status: released}`)
+	res := eng.Execute(commandreq.Must("search", "Movies", "noSuchSearch", map[string]any{"status": "released"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}
@@ -116,7 +117,7 @@ func TestSearchCommandUnknownSearchName(t *testing.T) {
 func TestSearchCommandInvalidQueryDetail(t *testing.T) {
 	eng := testEngineWithSearch(t)
 	// The equals clause is bound to $status; omitting it must fail.
-	res := eng.Execute(`search Movies byStatus {}`)
+	res := eng.Execute(commandreq.Must("search", "Movies", "byStatus", map[string]any{}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure for a query missing the bound variable: %#v", res)
 	}
@@ -147,7 +148,7 @@ func TestSearchCommandRefusesWrongShard(t *testing.T) {
 	if err := eng.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	res := eng.Execute(`search Movies byStatus {status: released}`)
+	res := eng.Execute(commandreq.Must("search", "Movies", "byStatus", map[string]any{"status": "released"}))
 	if res["ok"] != false {
 		t.Fatalf("expected failure: %#v", res)
 	}

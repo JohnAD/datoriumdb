@@ -1,0 +1,16 @@
+{
+  "collection": "Movies",
+  "command": "fileList",
+  "files": [
+    {
+      "byteSize": 3,
+      "contentType": "image/png",
+      "name": "poster.png",
+      "operationId": "01FIXEDFILEOP000000000003",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "version": "<ID:1>"
+    }
+  ],
+  "id": "fixedidfile03",
+  "ok": true
+}

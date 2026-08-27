@@ -89,28 +89,25 @@ curl -sS http://127.0.0.1:8080/datoriumdb/v1/ready
 
 ### 4. Create a collection
 
-Collections are created from a schema file:
-
-```json
-{
-  "kind": "object",
-  "children": [
-    {"name": "title", "kind": "string", "required": true},
-    {"name": "releaseYear", "kind": "number", "integer": true},
-    {"name": "status", "kind": "string"}
-  ]
-}
-```
+Collections are created declaratively through the establishment server's
+admin API. With the server running and ready:
 
 ```text
+export DATORIUMDB_SIGNING_KEY_FILE=/path/to/signing-key.pem
+ADMIN=$(datoriumctl auth token issue --kind admin \
+  --config-dir /var/lib/datoriumdb/.config)
+
 datoriumctl collection create Movies movies-schema.json \
-  --config-dir /var/lib/datoriumdb/.config \
-  --data-dir /var/lib/datoriumdb
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN"
 ```
 
+Or pass `--signing-key-file` instead of `--admin-token` so the CLI mints a
+short-lived admin token itself.
+
 New collections start at schema version `0`. Schema changes go through
-`datoriumctl collection upgrade` (one version at a time); documents are
-migrated in the background and on access — you do not rewrite documents
+`datoriumctl collection upgrade` (one version at a time over HTTP); documents
+are migrated in the background and on access — you do not rewrite documents
 yourself.
 
 ### 5. Create a search (optional)
@@ -120,8 +117,8 @@ definition shape.
 
 ```text
 datoriumctl search create Movies byStatus search-def.json \
-  --config-dir /var/lib/datoriumdb/.config \
-  --data-dir /var/lib/datoriumdb
+  --establishment-url http://127.0.0.1:8080 \
+  --admin-token "$ADMIN"
 
 datoriumctl search list --config-dir /var/lib/datoriumdb/.config
 ```
@@ -135,9 +132,9 @@ one.
 TOKEN=...   # from datoriumctl auth token issue
 
 curl -sS -X POST http://127.0.0.1:8080/datoriumdb/v1/command \
-  -H "Content-Type: text/plain; charset=utf-8" \
+  -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  --data 'create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "The Matrix", releaseYear: 1999}'
+  --data '{"command":"create","target":"Movies","parameter":"01TESTMOVIES00000000000001","detail":{"$":"Movies:0","title":"The Matrix","releaseYear":1999}}'
 ```
 
 ## Multi-node setup

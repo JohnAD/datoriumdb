@@ -33,7 +33,7 @@ func TestComposeProxyReadReceivesReplicatedWritesButIsNotAReadTarget(t *testing.
 	token := testutil.ClientToken(t, cfg, "compose-proxy-read-client")
 	ctx := context.Background()
 
-	created, err := testutil.PostCommand(ctx, baseA, token, `create Movies 01TESTMOVIES00000000000001 {$: Movies:0, title: "Proxy Read Test"}`)
+	created, err := testutil.PostCommand(ctx, baseA, token, "create", "Movies", "01TESTMOVIES00000000000001", map[string]any{"$": "Movies:0", "title": "Proxy Read Test"})
 	if err != nil {
 		t.Fatalf("create on SOT: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestComposeProxyReadReceivesReplicatedWritesButIsNotAReadTarget(t *testing.
 	id, _ := created["id"].(string)
 
 	testutil.PollUntilErr(t, 15*time.Second, 250*time.Millisecond, func() error {
-		res, err := testutil.PostCommand(ctx, baseB, token, `read Movies `+id+` {}`)
+		res, err := testutil.PostCommand(ctx, baseB, token, "read", "Movies", id, map[string]any{})
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func TestComposeProxyReadReceivesReplicatedWritesButIsNotAReadTarget(t *testing.
 
 	// analysisA is not a normal read target even though it now holds a
 	// replicated copy of the document.
-	proxyRead, err := testutil.PostCommand(ctx, baseProxy, token, `read Movies `+id+` {}`)
+	proxyRead, err := testutil.PostCommand(ctx, baseProxy, token, "read", "Movies", id, map[string]any{})
 	if err != nil {
 		t.Fatalf("read on proxy: %v", err)
 	}

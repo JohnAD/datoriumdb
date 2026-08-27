@@ -183,8 +183,8 @@ func cmdAuthTokenIssue(ctx *Context, args []string) Outcome {
 	if err != nil {
 		return ValidationFailSimple("auth.token.issue", "invalidArguments", err.Error())
 	}
-	if !hasKind || (kind != "client" && kind != "machine") {
-		return SimpleValidationError("auth.token.issue", "invalidArguments", "--kind must be client or machine")
+	if !hasKind || (kind != "client" && kind != "machine" && kind != "admin") {
+		return SimpleValidationError("auth.token.issue", "invalidArguments", "--kind must be client, machine, or admin")
 	}
 	if kind == "machine" && serverName == "" {
 		return SimpleValidationError("auth.token.issue", "invalidArguments", "--server-name is required for --kind machine")
@@ -213,18 +213,24 @@ func cmdAuthTokenIssue(ctx *Context, args []string) Outcome {
 		requestedLifetime = time.Duration(*lifetime) * time.Second
 	}
 	if subject == "" {
-		if kind == "machine" {
+		switch kind {
+		case "machine":
 			subject = serverName
-		} else {
+		case "admin":
+			subject = "admin"
+		default:
 			subject = "client"
 		}
 	}
 
 	var token string
 	var actual time.Duration
-	if kind == "client" {
+	switch kind {
+	case "client":
 		token, actual, err = issuer.IssueClientToken(subject, requestedLifetime)
-	} else {
+	case "admin":
+		token, actual, err = issuer.IssueAdminToken(subject, requestedLifetime)
+	default:
 		token, actual, err = issuer.IssueMachineToken(serverName, requestedLifetime)
 	}
 	if err != nil {

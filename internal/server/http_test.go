@@ -217,18 +217,22 @@ func TestEstablishAcceptsMachineToken(t *testing.T) {
 
 // --- command endpoint: content-type / body-size checks -----------------------
 
-func TestCommandRequiresPlainTextContentType(t *testing.T) {
+func TestCommandRequiresJSONContentType(t *testing.T) {
 	ts, _, issuer := testHarness(t)
 	token, _, _ := issuer.IssueClientToken("alice", 0)
 
-	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", `create Movies 01TESTMOVIES00000000000001 {}`, token)
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8",
+		`create Movies 01TESTMOVIES00000000000001 {}`, token)
 	env := decodeEnvelope(t, resp)
 	if env["ok"] != false || firstErrCode(t, env) != "contentTypeRequired" {
 		t.Fatalf("expected contentTypeRequired, got %#v", env)
 	}
 
-	resp = doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8",
-		`create Movies 01TESTMOVIES00000000000002 {$: Movies:0, title: "The Matrix"}`, token)
+	body, _ := json.Marshal(map[string]any{
+		"command": "create", "target": "Movies", "parameter": "01TESTMOVIES00000000000002",
+		"detail": map[string]any{"$": "Movies:0", "title": "The Matrix"},
+	})
+	resp = doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", string(body), token)
 	env = decodeEnvelope(t, resp)
 	if env["ok"] != true {
 		t.Fatalf("expected command to succeed: %#v", env)
@@ -238,8 +242,12 @@ func TestCommandRequiresPlainTextContentType(t *testing.T) {
 func TestCommandBodyTooLarge(t *testing.T) {
 	ts, _, issuer := testHarness(t)
 	token, _, _ := issuer.IssueClientToken("alice", 0)
-	huge := strings.Repeat("a", maxCommandBodyBytes+1)
-	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8", huge, token)
+	hugeDetail := map[string]any{"x": strings.Repeat("a", maxCommandBodyBytes)}
+	body, _ := json.Marshal(map[string]any{
+		"command": "create", "target": "Movies", "parameter": "01TESTMOVIES00000000000004",
+		"detail": hugeDetail,
+	})
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", string(body), token)
 	env := decodeEnvelope(t, resp)
 	if env["ok"] != false || firstErrCode(t, env) != "bodyTooLarge" {
 		t.Fatalf("expected bodyTooLarge, got %#v", env)
@@ -248,10 +256,54 @@ func TestCommandBodyTooLarge(t *testing.T) {
 
 func TestCommandWithoutTokenFails(t *testing.T) {
 	ts, _, _ := testHarness(t)
-	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "text/plain; charset=utf-8", "create Movies 01TESTMOVIES00000000000003 {}", "")
+	body, _ := json.Marshal(map[string]any{
+		"command": "create", "target": "Movies", "parameter": "01TESTMOVIES00000000000003",
+		"detail": map[string]any{},
+	})
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json", string(body), "")
 	env := decodeEnvelope(t, resp)
 	if env["ok"] != false || firstErrCode(t, env) != "unauthenticated" {
 		t.Fatalf("expected unauthenticated, got %#v", env)
+	}
+}
+
+func TestCommandRejectsUnknownRootField(t *testing.T) {
+	ts, _, issuer := testHarness(t)
+	token, _, _ := issuer.IssueClientToken("alice", 0)
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json",
+		`{"command":"read","target":"Movies","parameter":"id1","detail":{},"extra":true}`, token)
+	env := decodeEnvelope(t, resp)
+	if env["ok"] != false || firstErrCode(t, env) != "invalidRequest" {
+		t.Fatalf("expected invalidRequest, got %#v", env)
+	}
+}
+
+func TestCommandRejectsNonObjectDetail(t *testing.T) {
+	ts, _, issuer := testHarness(t)
+	token, _, _ := issuer.IssueClientToken("alice", 0)
+	resp := doReq(t, http.MethodPost, ts.URL+"/datoriumdb/v1/command", "application/json",
+		`{"command":"read","target":"Movies","parameter":"id1","detail":[]}`, token)
+	env := decodeEnvelope(t, resp)
+	if env["ok"] != false || firstErrCode(t, env) != "invalidRequest" {
+		t.Fatalf("expected invalidRequest, got %#v", env)
+	}
+}
+
+func TestLegacyFilesRoutesRemoved(t *testing.T) {
+	ts, _, issuer := testHarness(t)
+	token, _, _ := issuer.IssueClientToken("alice", 0)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/datoriumdb/v1/files/Movies/id1/photo.png", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected legacy /files route gone, got %d", resp.StatusCode)
 	}
 }
 
