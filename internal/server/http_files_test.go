@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"strconv"
 	"testing"
 
 	"github.com/JohnAD/datoriumdb/internal/fsstore"
@@ -25,6 +26,28 @@ func postJSONCommand(t *testing.T, baseURL, token string, cmd map[string]any) *h
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func postJSONCommandWithRange(t *testing.T, baseURL, token string, cmd map[string]any, byteRange string) *http.Response {
+	t.Helper()
+	body, err := json.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/datoriumdb/v1/command", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Range", byteRange)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -139,10 +162,83 @@ func TestFileHTTPLifecycle(t *testing.T) {
 	if readResp.Header.Get("X-DatoriumDB-SHA256") == "" {
 		t.Fatal("missing X-DatoriumDB-SHA256")
 	}
+	if readResp.Header.Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("Accept-Ranges=%q", readResp.Header.Get("Accept-Ranges"))
+	}
+	if readResp.ContentLength != int64(len(payload)) {
+		t.Fatalf("Content-Length=%d want %d", readResp.ContentLength, len(payload))
+	}
 	got, _ := io.ReadAll(readResp.Body)
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("download = %q", got)
 	}
+	readCommand := map[string]any{
+		"command": "fileRead", "target": "Movies", "parameter": testFileDocID,
+		"detail": map[string]any{"filename": "photo.png"},
+	}
+	for _, tc := range []struct {
+		name, header, contentRange string
+		want                       []byte
+	}{
+		{"closed", "bytes=1-3", "bytes 1-3/" + strconv.Itoa(len(payload)), payload[1:4]},
+		{"open-ended", "bytes=4-", "bytes 4-13/" + strconv.Itoa(len(payload)), payload[4:]},
+		{"suffix", "bytes=-4", "bytes " + strconv.Itoa(len(payload)-4) + "-" + strconv.Itoa(len(payload)-1) + "/" + strconv.Itoa(len(payload)), payload[len(payload)-4:]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rangeResp := postJSONCommandWithRange(t, ts.URL, tok, readCommand, tc.header)
+			defer rangeResp.Body.Close()
+			rangeBody, err := io.ReadAll(rangeResp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rangeResp.StatusCode != http.StatusPartialContent || !bytes.Equal(rangeBody, tc.want) {
+				t.Fatalf("range status=%d body=%q want=%q", rangeResp.StatusCode, rangeBody, tc.want)
+			}
+			if got := rangeResp.Header.Get("Content-Range"); got != tc.contentRange {
+				t.Fatalf("Content-Range=%q want=%q", got, tc.contentRange)
+			}
+			if rangeResp.ContentLength != int64(len(tc.want)) {
+				t.Fatalf("Content-Length=%d want=%d", rangeResp.ContentLength, len(tc.want))
+			}
+			if rangeResp.Header.Get("Accept-Ranges") != "bytes" ||
+				rangeResp.Header.Get("X-DatoriumDB-SHA256") == "" ||
+				rangeResp.Header.Get("X-DatoriumDB-File-Version") != version ||
+				rangeResp.Header.Get("ETag") != `"`+version+`"` {
+				t.Fatalf("partial response missing file metadata headers: %v", rangeResp.Header)
+			}
+		})
+	}
+
+	for _, rangeHeader := range []string{"bytes=999-", "bytes=0-1,4-5"} {
+		t.Run("reject "+rangeHeader, func(t *testing.T) {
+			invalidResp := postJSONCommandWithRange(t, ts.URL, tok, readCommand, rangeHeader)
+			if invalidResp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("invalid range status=%d", invalidResp.StatusCode)
+			}
+			if got := invalidResp.Header.Get("Content-Range"); got != "bytes */"+strconv.Itoa(len(payload)) {
+				t.Fatalf("invalid Content-Range=%q", got)
+			}
+			invalidEnv := decodeEnvelope(t, invalidResp)
+			if invalidEnv["ok"] != false || firstErrCode(t, invalidEnv) != "invalidRange" {
+				t.Fatalf("invalid range envelope=%#v", invalidEnv)
+			}
+		})
+	}
+
+	t.Run("ignore unknown range unit", func(t *testing.T) {
+		resp := postJSONCommandWithRange(t, ts.URL, tok, readCommand, "items=0-1")
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK || !bytes.Equal(body, payload) {
+			t.Fatalf("unknown unit status=%d body=%q", resp.StatusCode, body)
+		}
+		if resp.Header.Get("Content-Range") != "" {
+			t.Fatalf("full body must not set Content-Range, got %q", resp.Header.Get("Content-Range"))
+		}
+	})
 
 	listResp := postJSONCommand(t, ts.URL, tok, map[string]any{
 		"command": "fileList", "target": "Movies", "parameter": testFileDocID,
