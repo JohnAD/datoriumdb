@@ -95,13 +95,22 @@ body) with headers:
 - `X-DatoriumDB-File-Version`
 - `X-DatoriumDB-Operation-Id`
 - `ETag` (quoted file version)
+- `Accept-Ranges: bytes`
 
-Failures always use the standard JSON error envelope (still typically HTTP 200).
+Without `Range`, the full file returns HTTP 200. An optional standard `Range`
+header supports exactly one closed (`bytes=start-end`), open-ended
+(`bytes=start-`), or suffix (`bytes=-suffix`) byte range. Successful ranges
+return HTTP 206 with `Content-Range` and the selected `Content-Length`.
+Unrecognized range units (anything other than `bytes=`) are ignored and the
+full file is returned as HTTP 200, per RFC 7233. Invalid, unsatisfiable, and
+multiple `bytes=` ranges return HTTP 416, `Content-Range: bytes */<total>`, and
+an `invalidRange` JSON envelope. Other failures use the standard JSON error
+envelope (still typically HTTP 200).
 
 ### Stable error codes
 
 `documentNotFound`, `fileNotFound`, `fileExists`, `fileVersionMismatch`,
-`invalidFileName`, `fileTooLarge`, `fileStale`, `contentTypeRequired`,
+`invalidFileName`, `fileTooLarge`, `fileStale`, `invalidRange`, `contentTypeRequired`,
 `invalidRequest`, plus existing routing/auth codes.
 
 ### Filename rules

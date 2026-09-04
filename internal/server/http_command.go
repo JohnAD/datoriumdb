@@ -66,7 +66,7 @@ func (s *HTTPServer) handleJSONCommand(w http.ResponseWriter, r *http.Request, c
 		}))
 		return
 	case "fileRead":
-		s.handleFileReadCommand(w, req)
+		s.handleFileReadCommand(w, r, req)
 		return
 	case "fileList":
 		writeJSON(w, s.Engine.ListFiles(req.Target, req.Parameter))
@@ -217,7 +217,7 @@ func (s *HTTPServer) dispatchFileDelete(req commandreq.Request) envelope.Result 
 	return s.Engine.DeleteFile(req.Target, req.Parameter, filename, version, opID)
 }
 
-func (s *HTTPServer) handleFileReadCommand(w http.ResponseWriter, req commandreq.Request) {
+func (s *HTTPServer) handleFileReadCommand(w http.ResponseWriter, r *http.Request, req commandreq.Request) {
 	detail, err := req.DetailMap()
 	if err != nil {
 		writeJSON(w, envelope.Fail(map[string]any{"command": "fileRead"}, envelope.Error{Code: "invalidDetail", Message: err.Error()}))
@@ -230,14 +230,36 @@ func (s *HTTPServer) handleFileReadCommand(w http.ResponseWriter, req commandreq
 		return
 	}
 	defer f.Close()
+	start, length, partial, rangeErr := parseSingleByteRange(r.Header.Get("Range"), entry.ByteSize)
+	if rangeErr != nil {
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(entry.ByteSize, 10))
+		writeJSONStatus(w, http.StatusRequestedRangeNotSatisfiable, envelope.Fail(
+			map[string]any{"command": "fileRead", "collection": req.Target, "id": req.Parameter, "filename": filename},
+			envelope.Error{Code: "invalidRange", Message: rangeErr.Error()},
+		))
+		return
+	}
+	if start > 0 {
+		if _, err := f.Seek(start, io.SeekStart); err != nil {
+			writeJSON(w, envelope.Fail(nil, envelope.Error{Code: "filesystemError", Message: err.Error()}))
+			return
+		}
+	}
 	w.Header().Set("Content-Type", entry.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(entry.ByteSize, 10))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("X-DatoriumDB-SHA256", entry.SHA256)
 	w.Header().Set("X-DatoriumDB-File-Version", entry.Version)
 	w.Header().Set("X-DatoriumDB-Operation-Id", entry.OperationID)
 	w.Header().Set("ETag", `"`+entry.Version+`"`)
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, f)
+	if partial {
+		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(start+length-1, 10)+"/"+strconv.FormatInt(entry.ByteSize, 10))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	_, _ = io.CopyN(w, f, length)
 }
 
 // registerSysFileRoutes adds machine-authenticated binary replication routes.
